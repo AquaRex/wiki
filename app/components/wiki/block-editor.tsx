@@ -6,6 +6,7 @@ import {
   Baseline,
   Bold,
   Braces,
+  ChevronDown,
   CircleCheck,
   CircleX,
   Code,
@@ -42,22 +43,24 @@ interface Snippet {
   /** [before, after] placed around the selection, when there is one. */
   wrap?: [string, string];
   block?: boolean;
+  /** Shown in the always-visible row; the rest hide behind "More". */
+  core?: boolean;
 }
 
 const SNIPPETS: Snippet[] = [
-  { label: "Section", icon: <Heading2 className="size-3.5" />, text: "## Section title\n^ Optional kicker line\n\nBody text.", block: true },
-  { label: "Subheading", icon: <Heading3 className="size-3.5" />, text: "### Subheading", block: true },
-  { label: "Bold", icon: <Bold className="size-3.5" />, text: "**bold**", wrap: ["**", "**"] },
-  { label: "Italic", icon: <Italic className="size-3.5" />, text: "*italic*", wrap: ["*", "*"] },
-  { label: "Code", icon: <Code className="size-3.5" />, text: "`code`", wrap: ["`", "`"] },
-  { label: "Term", icon: <Sigma className="size-3.5" />, text: "==highlighted term==", wrap: ["==", "=="] },
-  { label: "Subtext", icon: <Baseline className="size-3.5" />, text: "^ subtext", block: true },
-  { label: "Error", icon: <CircleX className="size-3.5" />, text: "::error text", wrap: ["::error ", ""] },
-  { label: "Warn", icon: <TriangleAlert className="size-3.5" />, text: "::warn text", wrap: ["::warn ", ""] },
-  { label: "Good", icon: <CircleCheck className="size-3.5" />, text: "::good text", wrap: ["::good ", ""] },
-  { label: "Tip", icon: <Info className="size-3.5" />, text: "::tips text", wrap: ["::tips ", ""] },
-  { label: "Muted", icon: <Baseline className="size-3.5" />, text: "::muted text", wrap: ["::muted ", ""] },
-  { label: "Wiki link", icon: <Link2 className="size-3.5" />, text: "[[Enemies/Example|label]]", wrap: ["[[", "]]"] },
+  { label: "Section", icon: <Heading2 className="size-3.5" />, text: "## Section title\n^ Optional kicker line\n\nBody text.", block: true, core: true },
+  { label: "Subheading", icon: <Heading3 className="size-3.5" />, text: "### Subheading", block: true, core: true },
+  { label: "Bold", icon: <Bold className="size-3.5" />, text: "**bold**", wrap: ["**", "**"], core: true },
+  { label: "Italic", icon: <Italic className="size-3.5" />, text: "*italic*", wrap: ["*", "*"], core: true },
+  { label: "Code", icon: <Code className="size-3.5" />, text: "`code`", wrap: ["`", "`"], core: true },
+  { label: "Term", icon: <Sigma className="size-3.5" />, text: "==highlighted term==", wrap: ["==", "=="], core: true },
+  { label: "Subtext", icon: <Baseline className="size-3.5" />, text: "^ subtext", block: true, core: true },
+  { label: "Error", icon: <CircleX className="size-3.5" />, text: ":error text", wrap: [":error ", ""] },
+  { label: "Warn", icon: <TriangleAlert className="size-3.5" />, text: ":warn text", wrap: [":warn ", ""] },
+  { label: "Good", icon: <CircleCheck className="size-3.5" />, text: ":good text", wrap: [":good ", ""] },
+  { label: "Tip", icon: <Info className="size-3.5" />, text: ":tips text", wrap: [":tips ", ""] },
+  { label: "Muted", icon: <Baseline className="size-3.5" />, text: ":muted text", wrap: [":muted ", ""] },
+  { label: "Wiki link", icon: <Link2 className="size-3.5" />, text: "[[Enemies/Example|label]]", wrap: ["[[", "]]"], core: true },
   { label: "Link", icon: <Link2 className="size-3.5" />, text: "[label](https://example.com)", wrap: ["[", "](https://example.com)"] },
   { label: "Var def", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What this variable controls}}" },
   { label: "Var ref", icon: <Braces className="size-3.5" />, text: "{{varName|shown text}}" },
@@ -73,9 +76,9 @@ const SNIPPETS: Snippet[] = [
   { label: "Note", icon: <MessageSquareWarning className="size-3.5" />, text: ":::note Worth knowing\nA side remark.\n:::", block: true, wrap: [":::note\n", "\n:::"] },
   { label: "Tips box", icon: <Info className="size-3.5" />, text: ":::tips\n**The tip.** Something helpful that isn't obvious.\n:::", block: true, wrap: [":::tips\n", "\n:::"] },
   { label: "Error box", icon: <TriangleAlert className="size-3.5" />, text: ":::error\n**The mistake.** Why it goes wrong and what to do instead.\n:::", block: true, wrap: [":::error\n", "\n:::"] },
-  { label: "Error line", icon: <CircleX className="size-3.5" />, text: ":::errorline\nSomething that went wrong.\n:::", block: true, wrap: [":::errorline\n", "\n:::"] },
-  { label: "Warn line", icon: <TriangleAlert className="size-3.5" />, text: ":::warnline\nSomething to be careful about.\n:::", block: true, wrap: [":::warnline\n", "\n:::"] },
-  { label: "Tips line", icon: <Info className="size-3.5" />, text: ":::tipsline\nSomething helpful.\n:::", block: true, wrap: [":::tipsline\n", "\n:::"] },
+  { label: "Error line", icon: <CircleX className="size-3.5" />, text: "::error Something that went wrong.", block: true, wrap: ["::error ", ""] },
+  { label: "Warn line", icon: <TriangleAlert className="size-3.5" />, text: "::warn Something to be careful about.", block: true, wrap: ["::warn ", ""] },
+  { label: "Tips line", icon: <Info className="size-3.5" />, text: "::tips Something helpful.", block: true, wrap: ["::tips ", ""] },
   {
     label: "Infobox",
     icon: <PanelRight className="size-3.5" />,
@@ -85,6 +88,22 @@ const SNIPPETS: Snippet[] = [
   { label: "Flow", icon: <GitBranch className="size-3.5" />, text: ":::flow\nFirst thing happens\nThen this\nFinally this\n:::", block: true },
   { label: "Steps", icon: <ListOrdered className="size-3.5" />, text: ":::steps\n- **First step** — what to do and why\n- **Second step** — what to do and why\n:::", block: true },
 ];
+
+function SnippetButton({ snippet, onInsert }: { snippet: Snippet; onInsert: (s: Snippet) => void }) {
+  return (
+    <button
+      type="button"
+      // Keep the textarea's selection: a click would otherwise blur it first.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => onInsert(snippet)}
+      title={snippet.label}
+      className="flex items-center gap-1 rounded border border-transparent px-1.5 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-dim hover:border-border hover:bg-surface hover:text-foreground"
+    >
+      {snippet.icon}
+      {snippet.label}
+    </button>
+  );
+}
 
 function useMutatePage(pagePath: string) {
   const revalidator = useRevalidator();
@@ -121,16 +140,16 @@ function BlockEditorPanel({
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(block.text);
+  const [showAll, setShowAll] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const { mutate, busy } = useMutatePage(pagePath);
 
   /**
-   * Grows the textarea to fit its content without moving the page under the
-   * cursor. Two things would otherwise scroll it: collapsing the height to 0 to
-   * measure scrollHeight, and the live preview above changing height as you
-   * type. Both are absorbed by pinning the textarea's viewport position across
-   * the resize and correcting the scroll by however much it drifted.
+   * Grows the textarea to fit its content. Measuring requires collapsing the
+   * height first, which would scroll the page; pinning the element's viewport
+   * position across the measure and correcting for any drift keeps the caret
+   * where the author left it.
    */
   const autoGrow = () => {
     const el = textareaRef.current;
@@ -258,38 +277,47 @@ function BlockEditorPanel({
         {renderMarkdown(draft, ctx, h2Start)}
         <div className="clear-both" />
       </div>
-      <div className="flex flex-wrap gap-1 border-b border-border bg-surface-2 px-2 py-1.5">
-        {SNIPPETS.map((snippet) => (
-          <button
-            key={snippet.label}
-            type="button"
-            onClick={() => insert(snippet)}
-            title={snippet.label}
-            className="flex items-center gap-1 rounded border border-transparent px-1.5 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-dim hover:border-border hover:bg-surface hover:text-foreground"
+      <div className="border-b border-border bg-surface-2 px-2 py-1.5">
+        <div className="flex flex-wrap items-center gap-1">
+          {SNIPPETS.filter((s) => s.core).map((snippet) => (
+            <SnippetButton key={snippet.label} snippet={snippet} onInsert={insert} />
+          ))}
+          <label
+            title="Upload image"
+            className="flex cursor-pointer items-center gap-1 rounded border border-transparent px-1.5 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-dim hover:border-border hover:bg-surface hover:text-foreground"
           >
-            {snippet.icon}
-            {snippet.label}
+            <ImageIcon className="size-3.5" />
+            Image
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  insertImage(file);
+                }
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowAll(!showAll)}
+            title={showAll ? "Fewer options" : "More options"}
+            className="ml-auto flex items-center gap-1 rounded border border-transparent px-1.5 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-faint hover:border-border hover:bg-surface hover:text-foreground"
+          >
+            {showAll ? "Less" : "More"}
+            <ChevronDown className={`size-3.5 transition-transform ${showAll ? "rotate-180" : ""}`} />
           </button>
-        ))}
-        <label
-          title="Upload image"
-          className="flex cursor-pointer items-center gap-1 rounded border border-transparent px-1.5 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-dim hover:border-border hover:bg-surface hover:text-foreground"
-        >
-          <ImageIcon className="size-3.5" />
-          Image
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) {
-                insertImage(file);
-              }
-              e.target.value = "";
-            }}
-          />
-        </label>
+        </div>
+        {showAll && (
+          <div className="mt-1 flex flex-wrap gap-1 border-t border-border pt-1.5">
+            {SNIPPETS.filter((s) => !s.core).map((snippet) => (
+              <SnippetButton key={snippet.label} snippet={snippet} onInsert={insert} />
+            ))}
+          </div>
+        )}
       </div>
       <textarea
         ref={mountTextarea}

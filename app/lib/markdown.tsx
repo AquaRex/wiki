@@ -75,9 +75,31 @@ function Asset({ ctx, src, alt, className }: { ctx: RenderContext; src: string; 
   return <img className={className} src={resolved} alt={alt} />;
 }
 
+/**
+ * Keys for rendered nodes.
+ *
+ * This counter is reset at the start of every top-level render, so the same
+ * markdown always produces the same keys. That is what lets React reuse the
+ * existing DOM instead of unmounting and rebuilding the whole preview on each
+ * keystroke — which previously made images blink out, reload, and shove the
+ * page around under the cursor while typing.
+ */
 let keyCounter = 0;
 function k(): number {
   return keyCounter++;
+}
+
+/**
+ * Strips inline markers so a formatted caption can still be used as alt text,
+ * which must be a plain string.
+ */
+function plainCaption(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/==([^=]+)==/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
 }
 
 export function slugify(text: string): string {
@@ -144,11 +166,14 @@ const INLINE_SRC = [
     "(\\*\\*.+?\\*\\*)", // 8 bold
     "(\\*[^*\\n]+\\*)", // 9 italic
     "(==[^=]+==)", // 10 accent term
-    "((?<!:)::(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 11 coloured inline run
+    "((?<!:):(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 11 coloured inline run
 ].join("|");
 
-/** ::error / ::warn / ::good / ::tips / ::muted — colour only, to end of line. */
-const INLINE_TONE_RE = /^::(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
+/** ":error text" — colour only, to end of line. */
+const INLINE_TONE_RE = /^:(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
+
+/** "::error text" — a coloured rule in front of the text, no box. */
+const LINE_TONE_RE = /^::(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
 
 const DEF_INNER_RE = /^\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^}]*?)\s*)?\}\}$/;
 
@@ -387,14 +412,8 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
   const body = dir.lines;
   switch (dir.type) {
     case "callout":
-    case "note":
-    case "errorline":
-    case "warnline":
-    case "goodline":
-    case "tipsline": {
-      // "...line" variants are a note with a coloured rule — no box.
-      const tone = /^(error|warn|good|tips)line$/.exec(dir.type)?.[1];
-      const cls = dir.type === "callout" ? "callout core" : tone ? `note line-${tone}` : "note";
+    case "note": {
+      const cls = dir.type === "callout" ? "callout core" : "note";
       return (
         <div key={k()} className={cls}>
           {dir.param && <p className="label">{dir.param}</p>}
@@ -551,7 +570,22 @@ function renderTable(lines: string[], ctx: RenderContext): React.ReactNode {
   );
 }
 
+/** Nesting depth — only the outermost call may reset the key counter. */
+let renderDepth = 0;
+
 export function renderMarkdown(text: string, ctx: RenderContext, h2Start = 0): React.ReactNode {
+  if (renderDepth === 0) {
+    keyCounter = 0;
+  }
+  renderDepth++;
+  try {
+    return renderBlocks(text, ctx, h2Start);
+  } finally {
+    renderDepth--;
+  }
+}
+
+function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.ReactNode {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const out: React.ReactNode[] = [];
   let h2Index = h2Start;
@@ -660,6 +694,29 @@ export function renderMarkdown(text: string, ctx: RenderContext, h2Start = 0): R
       continue;
     }
 
+    // "::error text" — a coloured rule in front, no box. Consecutive lines of
+    // the same tone form one run so a multi-line remark shares its rule.
+    const lineTone = LINE_TONE_RE.exec(line.trim());
+    if (lineTone) {
+      const tone = lineTone[1];
+      const runLines: string[] = [lineTone[2]];
+      i++;
+      while (i < lines.length) {
+        const next = LINE_TONE_RE.exec(lines[i].trim());
+        if (!next || next[1] !== tone) {
+          break;
+        }
+        runLines.push(next[2]);
+        i++;
+      }
+      out.push(
+        <div key={k()} className={`note line-${tone}`}>
+          {renderMarkdown(runLines.join("\n"), ctx)}
+        </div>
+      );
+      continue;
+    }
+
     if (line.trim().startsWith("|")) {
       const tableLines: string[] = [];
       while (i < lines.length && lines[i].trim().startsWith("|")) {
@@ -714,10 +771,11 @@ export function renderMarkdown(text: string, ctx: RenderContext, h2Start = 0): R
 
     const imgMatch = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(line.trim());
     if (imgMatch) {
+      const caption = imgMatch[1];
       out.push(
         <figure key={k()} className="wk-img">
-          <Asset ctx={ctx} src={imgMatch[2]} alt={imgMatch[1]} />
-          {imgMatch[1] && <figcaption>{imgMatch[1]}</figcaption>}
+          <Asset ctx={ctx} src={imgMatch[2]} alt={plainCaption(caption)} />
+          {caption && <figcaption>{renderInline(caption, ctx)}</figcaption>}
         </figure>
       );
       i++;
@@ -729,7 +787,10 @@ export function renderMarkdown(text: string, ctx: RenderContext, h2Start = 0): R
     while (
       i < lines.length &&
       lines[i].trim() &&
-      !/^(```|:::|#|\^ |>|\||\s*[-*]\s|\s*\d+\.\s|!\[)/.test(lines[i])
+      // "::" starts a tone line and ends the paragraph; a bare ":" does not.
+      !/^(```|:::|::(?:error|warn|good|tips|muted)\b|#|\^ |>|\||\s*[-*]\s|\s*\d+\.\s|!\[|-{3,}\s*$|\*{3,}\s*$)/.test(
+        lines[i]
+      )
     ) {
       paraLines.push(lines[i]);
       i++;
