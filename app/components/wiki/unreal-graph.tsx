@@ -111,11 +111,38 @@ const ROLE_HEADER: Record<UeRole, string> = {
   "variable-get": "#5b819b",
   "variable-set": "#5b819b",
   flow: "#5b819b",
-  material: "#3a3a5a",
+  material: "#658361",
   other: "#22303c",
 };
 
+/**
+ * Material expression nodes are tinted by their concrete type, matching how UE
+ * groups them: math/utility green, parameters, scene/depth reads, functions, etc.
+ */
+function materialHeaderColor(classLeaf: string): string {
+  const c = classLeaf.replace(/^MaterialExpression/, "");
+  if (classLeaf === "MaterialGraphNode_Root") {
+    return "#3a3a3a"; // the final material output node
+  }
+  if (c === "ScalarParameter") {
+    return "#618b39"; // same as a float
+  }
+  if (c === "VectorParameter") {
+    return "#8b742a"; // same as a Vector pin
+  }
+  if (/^(SceneDepth|PixelDepth|SceneColor|WorldPosition|AbsoluteWorldPosition|SceneTexture|ScreenPosition|ViewProperty|ObjectPosition|ActorPosition|CameraPosition|CameraVector)/.test(c)) {
+    return "#7c1818"; // scene/position reads — red, like Events in Blueprint
+  }
+  if (/Function/.test(c)) {
+    return "#597f98"; // material functions / calls
+  }
+  return "#658361"; // math & utility (Lerp, Multiply, Saturate, Add, …)
+}
+
 function headerColor(node: UeNode): string {
+  if (node.role === "material") {
+    return materialHeaderColor(node.classLeaf);
+  }
   return ROLE_HEADER[node.role] ?? ROLE_HEADER.other;
 }
 
@@ -149,13 +176,20 @@ function nodeWidth(node: UeNode): number {
     return Math.max(56, pillLabel(node).length * CHAR_W + 34);
   }
   const rows = Math.max(node.inputs.length, node.outputs.length);
-  const titleW = node.title.length * CHAR_W + 28;
   let pinW = 0;
   for (let i = 0; i < rows; i++) {
     const left = node.inputs[i]?.label.length ?? 0;
     const right = node.outputs[i]?.label.length ?? 0;
     pinW = Math.max(pinW, (left + right) * CHAR_W + 44);
   }
+  // Material expression nodes are compact in UE: single-letter pins (A/B/Alpha)
+  // and the title doesn't force the width the way a Blueprint node's does. Let
+  // the pins size them, with a tighter floor, so Lerp/Multiply/Divide stay small.
+  if (node.role === "material") {
+    const titleW = node.title.length * CHAR_W * 0.62 + 20;
+    return Math.max(96, Math.min(titleW, 150), pinW);
+  }
+  const titleW = node.title.length * CHAR_W + 28;
   return Math.max(NODE_MIN_W, titleW, pinW);
 }
 
@@ -336,29 +370,25 @@ function NodeBox({
         cursor: "move",
       }}
     >
-      {/* The type colour is a short accent line across the top, centred at ~85%
-          width, with the title on the node background directly below it. */}
-      <div
-        style={{
-          height: HEADER_H,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: "center",
-          padding: "0 10px",
-          whiteSpace: "nowrap",
-        }}
-      >
+      {/* The type colour is a full-width accent line across the very top, with the
+          title on the node background directly below it. */}
+      <div style={{ height: HEADER_H, display: "flex", flexDirection: "column" }}>
+        <div style={{ width: "100%", height: 4.5, background: headerColor(p.node), flex: "none" }} />
         <div
           style={{
-            width: "85%",
-            height: 4.5,
-            borderRadius: 3,
-            background: headerColor(p.node),
-            marginBottom: 4,
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            padding: "0 10px",
+            color: "#fff",
+            fontSize: p.node.role === "material" ? 11 : 12.5,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
           }}
-        />
-        <div style={{ color: "#fff", fontSize: 12.5, fontWeight: 600, alignSelf: "flex-start" }}>
+          title={p.node.title}
+        >
           {p.node.title}
         </div>
       </div>
