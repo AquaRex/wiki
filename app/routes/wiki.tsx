@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useRevalidator } from "react-router";
 import { FolderOpen, GripVertical, Lock, Moon, Pencil, Plus, Sun, Trash2, Unlock } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -16,7 +16,7 @@ import {
   type WikiPage,
 } from "~/lib/shared";
 import { getStore } from "~/lib/store";
-import { renderMarkdown } from "~/lib/markdown";
+import { renderMarkdown, type RenderContext } from "~/lib/markdown";
 import { useAuth } from "~/lib/auth";
 import { useProjectMeta, useRootMeta } from "~/lib/meta";
 import { wikiConfig } from "~/wiki.config";
@@ -403,6 +403,101 @@ function NotFound({ requestedPath }: { requestedPath: string }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Page header                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The big H1. Renders the page's `header` markdown (text or an image); when the
+ * header is empty it falls back to the page name, so the page always reads as
+ * finished — no placeholder chrome, even in edit mode. Signed in, clicking it
+ * opens an inline editor for the header markdown.
+ */
+function PageHeader({
+  page,
+  editUnlocked,
+  ctx,
+}: {
+  page: WikiPage;
+  editUnlocked: boolean;
+  ctx: RenderContext;
+}) {
+  const revalidator = useRevalidator();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(page.header);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setDraft(page.header);
+  }, [page.header]);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const save = async () => {
+    setEditing(false);
+    if (draft !== page.header) {
+      try {
+        await getStore().updatePage(page.path, (p) => {
+          p.header = draft;
+        });
+        revalidator.revalidate();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : "Saving failed.");
+        setDraft(page.header);
+      }
+    }
+  };
+
+  const display = page.header ? (
+    <div className="wiki">{renderMarkdown(page.header, ctx)}</div>
+  ) : (
+    <h1>{page.title}</h1>
+  );
+
+  if (!editUnlocked) {
+    return <div className="hero-title mt-4 font-heading">{display}</div>;
+  }
+
+  if (editing) {
+    return (
+      <textarea
+        ref={inputRef}
+        rows={2}
+        value={draft}
+        placeholder={`Header — text or ![](image). Empty shows “${page.title}”.`}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && e.ctrlKey) {
+            e.preventDefault();
+            save();
+          }
+          if (e.key === "Escape") {
+            setDraft(page.header);
+            setEditing(false);
+          }
+        }}
+        className="hero-title mt-4 font-heading w-full bg-transparent outline-none ring-1 ring-accent-line rounded-md px-2 -mx-2"
+      />
+    );
+  }
+
+  return (
+    <div
+      className="hero-title mt-4 font-heading cursor-text rounded-md decoration-dotted hover:ring-1 hover:ring-accent-line"
+      onClick={() => setEditing(true)}
+      title="Click to edit the header"
+    >
+      {display}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Page view                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -501,26 +596,10 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
                   placeholder="Page name (used in the URL and index)"
                 />
               )}
-              {/* The big header. Falls back to the page name when empty, so a
-                  reader always sees a heading even if none was set. */}
-              {editUnlocked ? (
-                <EditableText
-                  value={page.header}
-                  field="header"
-                  pagePath={page.path}
-                  editUnlocked={editUnlocked}
-                  className="hero-title mt-2 font-heading"
-                  placeholder={`Header (defaults to “${page.title}”) — text or ![](image)`}
-                  as="div"
-                  markdown={renderCtx}
-                />
-              ) : page.header ? (
-                <div className="hero-title mt-4 font-heading wiki">
-                  {renderMarkdown(page.header, renderCtx)}
-                </div>
-              ) : (
-                <h1 className="hero-title mt-4 font-heading">{page.title}</h1>
-              )}
+              {/* The big header. Falls back to the page name when empty, so it
+                  always reads as a finished page — no placeholder chrome, even
+                  in edit mode. Click it to edit the header markdown. */}
+              <PageHeader page={page} editUnlocked={editUnlocked} ctx={renderCtx} />
               <EditableText
                 value={page.lede}
                 field="lede"
