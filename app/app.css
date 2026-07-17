@@ -661,8 +661,6 @@
  * gloss on what the section covers.
  */
 .wiki .wk-h-img {
-  margin-left: auto;
-  align-self: flex-end;
   max-height: 2.1em;
   width: auto;
   flex: none;
@@ -672,40 +670,75 @@
 .wiki .wk-h3 .wk-h-img {
   max-height: 1.7em;
 }
-/* "<" pins the heading image left, right after the title, instead of far right. */
-.wiki .wk-h-img.align-left {
+/* Horizontal pin within the heading row. */
+.wiki .wk-h-img.h-right {
+  margin-left: auto;
+}
+.wiki .wk-h-img.h-left {
   margin-left: 12px;
+}
+.wiki .wk-h-img.h-center {
+  margin-left: auto;
+  margin-right: auto;
+}
+/* Vertical pin against the heading text. */
+.wiki .wk-h-img.v-bottom {
+  align-self: flex-end;
+}
+.wiki .wk-h-img.v-top {
+  align-self: flex-start;
 }
 
 .wiki .wk-inline-img {
   max-width: 100%;
 }
-.wiki .wk-inline-img.align-left {
+/* An inline image on its own becomes a block so it can be positioned. */
+.wiki .wk-inline-img.h-left {
   display: block;
   margin-right: auto;
 }
-.wiki .wk-inline-img.align-right {
+.wiki .wk-inline-img.h-center {
   display: block;
   margin-left: auto;
-}
-
-/* A block figure pinned to one side of the content column. */
-.wiki .wk-img.align-left {
-  margin-left: 0;
   margin-right: auto;
 }
-.wiki .wk-img.align-right {
+.wiki .wk-inline-img.h-right {
+  display: block;
   margin-left: auto;
-  margin-right: 0;
-}
-.wiki .wk-img.align-left img,
-.wiki .wk-img.align-right img {
-  display: inline-block;
 }
 
 .wiki .wk-img {
   margin: 22px 0;
   max-width: var(--measure);
+}
+/*
+ * Block figures.
+ *   left   — a plain block at the left of the column (the default; no wrap)
+ *   right  — floats right so following text wraps around it, like an :::infobox
+ *   centre — a centred block
+ * The vertical hint only matters for the right float: v-top lets text wrap from
+ * the image's top (default), v-bottom clears the float so nothing wraps.
+ */
+.wiki .wk-img.h-left {
+  margin-left: 0;
+  margin-right: auto;
+}
+.wiki .wk-img.h-right {
+  float: right;
+  margin: 6px 0 12px 22px;
+  max-width: min(360px, 45%);
+}
+.wiki .wk-img.h-center {
+  margin-left: auto;
+  margin-right: auto;
+}
+.wiki .wk-img.h-right.v-bottom {
+  clear: right;
+}
+.wiki .wk-img.h-left img,
+.wiki .wk-img.h-right img,
+.wiki .wk-img.h-center img {
+  display: inline-block;
 }
 .wiki .wk-img img {
   max-width: 100%;
@@ -1096,4 +1129,76 @@
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 13px;
+}
+
+/* ---- Image lightbox (click any image to open) ---- */
+.wk-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+  animation: wk-lightbox-in 120ms ease-out;
+}
+@keyframes wk-lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.wk-lightbox-stage {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+.wk-lightbox-stage:active {
+  cursor: grabbing;
+}
+.wk-lightbox-img {
+  max-width: 92vw;
+  max-height: 92vh;
+  transform-origin: center;
+  will-change: transform;
+  user-select: none;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+}
+.wk-lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  z-index: 101;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wk-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+.wk-lightbox-hint {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.4);
+  padding: 4px 10px;
+  border-radius: 6px;
+  pointer-events: none;
 }

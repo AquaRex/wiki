@@ -3,6 +3,7 @@ import { ThemeProvider } from "next-themes";
 
 import type { Route } from "./+types/root";
 import { AuthProvider } from "./lib/auth";
+import { Lightbox } from "./components/wiki/lightbox";
 import "./app.css";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -17,6 +18,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <body>
         <ThemeProvider attribute="class" defaultTheme="dark" disableTransitionOnChange>
           <AuthProvider>{children}</AuthProvider>
+          <Lightbox />
         </ThemeProvider>
         <ScrollRestoration />
         <Scripts />

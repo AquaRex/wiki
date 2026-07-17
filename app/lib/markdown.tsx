@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { UnrealGraph } from "~/components/wiki/unreal-graph";
+import { openLightbox } from "~/components/wiki/lightbox";
 
 export interface RenderVariable {
   name: string;
@@ -36,7 +37,20 @@ const assetUrls = new Map<string, string>();
  * The effect deliberately depends on `src` alone: `ctx` is rebuilt on every
  * render by its caller, so depending on it would re-run this constantly.
  */
-function Asset({ ctx, src, alt, className }: { ctx: RenderContext; src: string; alt: string; className?: string }) {
+function Asset({
+  ctx,
+  src,
+  alt,
+  className,
+  width,
+}: {
+  ctx: RenderContext;
+  src: string;
+  alt: string;
+  className?: string;
+  /** Optional display width in px, from a {w=…} suffix. */
+  width?: number | null;
+}) {
   const resolver = ctx.resolveAsset;
   const [resolved, setResolved] = useState<string | null>(() => assetUrls.get(src) ?? null);
   // "pending" while resolving, "failed" once the URL can't resolve or the image
@@ -97,7 +111,14 @@ function Asset({ ctx, src, alt, className }: { ctx: RenderContext; src: string; 
     return <span className={className} style={{ display: "block", minHeight: 24 }} aria-hidden />;
   }
   return (
-    <img className={className} src={resolved} alt={alt} onError={() => setStatus("failed")} />
+    <img
+      className={`${className ?? ""} wk-img-zoomable`.trim()}
+      src={resolved}
+      alt={alt}
+      style={width ? { width, maxWidth: "100%", cursor: "zoom-in" } : { cursor: "zoom-in" }}
+      onError={() => setStatus("failed")}
+      onClick={() => openLightbox(resolved, alt)}
+    />
   );
 }
 
@@ -184,34 +205,79 @@ function highlightCode(text: string): React.ReactNode {
   return out;
 }
 
-export type ImageAlign = "left" | "right" | "wrap-left" | "wrap-right" | "none";
+export type HAlign = "left" | "center" | "right";
+export type VAlign = "top" | "bottom";
 
-/**
- * Alignment rides on the end of the image URL, so it stays inside the ordinary
- * image syntax and every existing image keeps working:
- *
- *   ![cap](/x.png)      default — block figure, or inline in a heading
- *   ![cap](/x.png <)    pinned left
- *   ![cap](/x.png >)    pinned right
- *   ![cap](/x.png <<)   floated left, text wraps around it
- *   ![cap](/x.png >>)   floated right, text wraps around it
- */
-function splitImageAlign(src: string): { src: string; align: ImageAlign } {
-  const match = /^(.*?)\s*(<|>)\s*$/.exec(src);
-  if (!match) {
-    return { src: src.trim(), align: "none" };
-  }
-  const align = match[2] === "<" ? "left" : "right";
-  return { src: match[1].trim(), align };
+export interface ImageAlign {
+  h: HAlign;
+  v: VAlign;
+  /** Whether any alignment marker was written at all. */
+  set: boolean;
 }
 
-const ALIGN_CLASS: Record<ImageAlign, string> = {
-  left: "align-left",
-  right: "align-right",
-  "wrap-left": "wrap-left",
-  "wrap-right": "wrap-right",
-  none: "",
-};
+/**
+ * Alignment rides on the end of the image URL, inside the ordinary image syntax,
+ * so every existing image keeps working. A trailing token combines a horizontal
+ * and a vertical pin, in either order:
+ *
+ *   horizontal — "<" left (default), "c" centre, ">" right
+ *   vertical   — "^" top (default), "v" bottom
+ *
+ *   ![cap](/x.png)      left, top   (the default)
+ *   ![cap](/x.png >)    right, top
+ *   ![cap](/x.png c)    centre, top
+ *   ![cap](/x.png >v)   right, bottom
+ *   ![cap](/x.png cv)   centre, bottom
+ *   ![cap](/x.png v>)   same as >v — order doesn't matter
+ */
+function splitImageAlign(src: string): { src: string; align: ImageAlign } {
+  const match = /^(.*?)\s*([<>cv^]{1,2})\s*$/i.exec(src);
+  if (!match) {
+    return { src: src.trim(), align: { h: "left", v: "top", set: false } };
+  }
+  const marker = match[2].toLowerCase();
+  let h: HAlign = "left";
+  let v: VAlign = "top";
+  if (marker.includes(">")) {
+    h = "right";
+  } else if (marker.includes("c")) {
+    h = "center";
+  } else if (marker.includes("<")) {
+    h = "left";
+  }
+  if (marker.includes("v")) {
+    v = "bottom";
+  }
+  return { src: match[1].trim(), align: { h, v, set: true } };
+}
+
+/** CSS classes for an image's horizontal + vertical pin. */
+function alignClasses(align: ImageAlign): string {
+  return `h-${align.h} v-${align.v}`;
+}
+
+/**
+ * Reads an optional size suffix written after the image, e.g.
+ *   ![cap](/x.png){w=300}
+ * Accepts `w` or `width`. Returns the width in pixels, or null when absent.
+ * Since we click to view an image full size, a smaller inline width is fine.
+ */
+function parseImageSize(suffix: string | undefined): number | null {
+  if (!suffix) {
+    return null;
+  }
+  const m = /\{\s*(?:w|width)\s*=\s*(\d{1,4})\s*(?:px)?\s*\}/i.exec(suffix);
+  return m ? Number(m[1]) : null;
+}
+
+/** Splits an image token into its `![…](…)` part and any trailing `{…}` suffix. */
+function splitImageSuffix(token: string): { image: string; suffix: string | undefined } {
+  const m = /^(!\[[^\]]*\]\([^)]+\))(\{[^}]*\})?$/.exec(token);
+  if (!m) {
+    return { image: token, suffix: undefined };
+  }
+  return { image: m[1], suffix: m[2] };
+}
 
 /**
  * Strips inline markers so a formatted caption can still be used as alt text,
@@ -285,7 +351,7 @@ const INLINE_SRC = [
     "(\\{\\{-?\\d[^|}]*(?:\\|[^}]*)?\\}\\})", // 3 magic value (starts with a digit — names can't)
     "(\\{\\{[A-Za-z0-9_.-]+(?:\\|[^}]*)?\\}\\})", // 4 variable reference
     "(\\[\\[[^\\]]+\\]\\])", // 5 wiki link
-    "(!\\[[^\\]]*\\]\\([^)]+\\))", // 6 image
+    "(!\\[[^\\]]*\\]\\([^)]+\\)(?:\\{[^}]*\\})?)", // 6 image (optional {w=…} size)
     "(\\[[^\\]]+\\]\\([^)]+\\))", // 7 external link
     "(\\*\\*.+?\\*\\*)", // 8 bold
     "(\\*[^*\\n]+\\*)", // 9 italic
@@ -447,10 +513,13 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
         </Link>
       );
     } else if (m[6]) {
-      const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(token)!;
+      const { image, suffix } = splitImageSuffix(token);
+      const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(image)!;
       const { src: imgSrc, align } = splitImageAlign(im[2]);
-      const inlineClass = align === "none" ? "wk-inline-img" : `wk-inline-img ${ALIGN_CLASS[align]}`;
-      out.push(<Asset key={k()} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} />);
+      const inlineClass = `wk-inline-img ${alignClasses(align)}`;
+      out.push(
+        <Asset key={k()} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} width={parseImageSize(suffix)} />
+      );
     } else if (m[7]) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!;
       out.push(
@@ -499,12 +568,15 @@ interface DirectiveLines {
  * Splits a trailing image off a heading line, so `## Title ![](/x.png)` can
  * render the image to the right of the title rather than inline in the text.
  */
-function splitHeadingImage(text: string): { text: string; image: { src: string; alt: string } | null } {
-  const match = /^(.*?)\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(text);
+function splitHeadingImage(text: string): {
+  text: string;
+  image: { src: string; alt: string; width: number | null } | null;
+} {
+  const match = /^(.*?)\s*!\[([^\]]*)\]\(([^)]+)\)(\{[^}]*\})?\s*$/.exec(text);
   if (!match) {
     return { text, image: null };
   }
-  return { text: match[1].trim(), image: { alt: match[2], src: match[3] } };
+  return { text: match[1].trim(), image: { alt: match[2], src: match[3], width: parseImageSize(match[4]) } };
 }
 
 function Heading({
@@ -520,13 +592,19 @@ function Heading({
 }) {
   const { text: label, image } = splitHeadingImage(text);
   const Tag = (level === 4 ? "h4" : level === 3 ? "h3" : "h2") as React.ElementType;
-  // A heading image pins right by default; "<" pins it left, next to the title.
+  // A heading image pins to the far right by default (that's its purpose); an
+  // explicit marker overrides both axes. Vertical maps to bottom/top alignment
+  // against the heading text.
   const aligned = image ? splitImageAlign(image.src) : null;
-  const headImgClass = aligned && aligned.align === "left" ? "wk-h-img align-left" : "wk-h-img";
+  const headImgClass =
+    aligned && aligned.align.set
+      ? `wk-h-img ${alignClasses(aligned.align)}`
+      : "wk-h-img h-right v-bottom";
   return (
     <Tag className={level === 2 ? "wk-h2" : "wk-h3"} id={slugify(label)}>
       {num !== undefined && <span className="num">{String(num).padStart(2, "0")}</span>}
       <span>{renderInline(label, ctx)}</span>
+      {/* Heading images are height-constrained icons, so a {w=…} size is ignored. */}
       {image && aligned && <Asset ctx={ctx} src={aligned.src} alt={image.alt} className={headImgClass} />}
     </Tag>
   );
@@ -948,15 +1026,16 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       continue;
     }
 
-    const imgMatch = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(line.trim());
+    const imgMatch = /^!\[([^\]]*)\]\(([^)]+)\)(\{[^}]*\})?\s*$/.exec(line.trim());
     if (imgMatch) {
       const caption = imgMatch[1];
       const { src: imgSrc, align } = splitImageAlign(imgMatch[2]);
-      const figClass = align === "none" ? "wk-img" : `wk-img ${ALIGN_CLASS[align]}`;
+      const width = parseImageSize(imgMatch[3]);
+      const figClass = `wk-img ${alignClasses(align)}`;
       out.push(
         // Keyed by src so editing text elsewhere never remounts the image.
-        <figure key={bk("img", imgSrc)} className={figClass}>
-          <Asset ctx={ctx} src={imgSrc} alt={plainCaption(caption)} />
+        <figure key={bk("img", imgSrc)} className={figClass} style={width ? { maxWidth: width } : undefined}>
+          <Asset ctx={ctx} src={imgSrc} alt={plainCaption(caption)} width={width} />
           {caption && <figcaption>{renderInline(caption, ctx)}</figcaption>}
         </figure>
       );
