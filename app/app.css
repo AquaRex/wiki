@@ -707,6 +707,33 @@
   margin-left: auto;
 }
 
+/*
+ * A row of images sharing one line — several sized figures side by side that
+ * wrap to the next line when they run out of room. The row's horizontal pin
+ * (from the first image) decides how the group aligns; centred rows push apart
+ * to sit in the middle.
+ */
+.wiki .wk-img-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+  margin: 22px 0;
+}
+.wiki .wk-img-row.row-left {
+  justify-content: flex-start;
+}
+.wiki .wk-img-row.row-center {
+  justify-content: center;
+}
+.wiki .wk-img-row.row-right {
+  justify-content: flex-end;
+}
+.wiki .wk-img-row .wk-img {
+  margin: 0;
+  flex: 0 1 auto;
+}
+
 .wiki .wk-img {
   margin: 22px 0;
   max-width: var(--measure);

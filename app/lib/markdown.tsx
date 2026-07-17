@@ -279,6 +279,43 @@ function splitImageSuffix(token: string): { image: string; suffix: string | unde
   return { image: m[1], suffix: m[2] };
 }
 
+interface RowImage {
+  src: string;
+  caption: string;
+  align: ImageAlign;
+  width: number | null;
+}
+
+/**
+ * If a whole line is nothing but images (`![cap](src){w=…}`), separated only by
+ * whitespace, returns them parsed; otherwise null. Lets several sized images
+ * share one line as a gallery row, and also handles the ordinary single image.
+ */
+const ROW_IMAGE_RE = /!\[([^\]]*)\]\(([^)]+)\)(\{[^}]*\})?/g;
+
+function parseImageRow(line: string): RowImage[] | null {
+  if (!line.startsWith("![")) {
+    return null;
+  }
+  const images: RowImage[] = [];
+  ROW_IMAGE_RE.lastIndex = 0;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = ROW_IMAGE_RE.exec(line)) !== null) {
+    // Anything but whitespace between/around the images means it's prose, not a row.
+    if (line.slice(last, m.index).trim() !== "") {
+      return null;
+    }
+    const { src, align } = splitImageAlign(m[2]);
+    images.push({ src, caption: m[1], align, width: parseImageSize(m[3]) });
+    last = m.index + m[0].length;
+  }
+  if (line.slice(last).trim() !== "") {
+    return null;
+  }
+  return images.length > 0 ? images : null;
+}
+
 /**
  * Strips inline markers so a formatted caption can still be used as alt text,
  * which must be a plain string.
@@ -1026,19 +1063,34 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       continue;
     }
 
-    const imgMatch = /^!\[([^\]]*)\]\(([^)]+)\)(\{[^}]*\})?\s*$/.exec(line.trim());
-    if (imgMatch) {
-      const caption = imgMatch[1];
-      const { src: imgSrc, align } = splitImageAlign(imgMatch[2]);
-      const width = parseImageSize(imgMatch[3]);
-      const figClass = `wk-img ${alignClasses(align)}`;
-      out.push(
-        // Keyed by src so editing text elsewhere never remounts the image.
-        <figure key={bk("img", imgSrc)} className={figClass} style={width ? { maxWidth: width } : undefined}>
-          <Asset ctx={ctx} src={imgSrc} alt={plainCaption(caption)} width={width} />
-          {caption && <figcaption>{renderInline(caption, ctx)}</figcaption>}
-        </figure>
-      );
+    // A line that is only images (one or more, space-separated) becomes a row.
+    // With one image it's the usual single figure; with several they sit side by
+    // side and wrap to the next line as needed — a lightweight gallery.
+    const rowImages = parseImageRow(line.trim());
+    if (rowImages) {
+      if (rowImages.length === 1) {
+        const im = rowImages[0];
+        const figClass = `wk-img ${alignClasses(im.align)}`;
+        out.push(
+          <figure key={bk("img", im.src)} className={figClass} style={im.width ? { maxWidth: im.width } : undefined}>
+            <Asset ctx={ctx} src={im.src} alt={plainCaption(im.caption)} width={im.width} />
+            {im.caption && <figcaption>{renderInline(im.caption, ctx)}</figcaption>}
+          </figure>
+        );
+      } else {
+        // The row's horizontal alignment follows the first image's pin.
+        const rowAlign = rowImages[0].align.h;
+        out.push(
+          <div key={bk("imgrow", line.trim())} className={`wk-img-row row-${rowAlign}`}>
+            {rowImages.map((im, idx) => (
+              <figure key={idx} className="wk-img" style={im.width ? { maxWidth: im.width } : undefined}>
+                <Asset ctx={ctx} src={im.src} alt={plainCaption(im.caption)} width={im.width} />
+                {im.caption && <figcaption>{renderInline(im.caption, ctx)}</figcaption>}
+              </figure>
+            ))}
+          </div>
+        );
+      }
       i++;
       continue;
     }
