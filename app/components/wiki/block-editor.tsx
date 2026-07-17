@@ -76,9 +76,9 @@ const SNIPPETS: Snippet[] = [
   { label: "Note", icon: <MessageSquareWarning className="size-3.5" />, text: ":::note Worth knowing\nA side remark.\n:::", block: true, wrap: [":::note\n", "\n:::"] },
   { label: "Tips box", icon: <Info className="size-3.5" />, text: ":::tips\n**The tip.** Something helpful that isn't obvious.\n:::", block: true, wrap: [":::tips\n", "\n:::"] },
   { label: "Error box", icon: <TriangleAlert className="size-3.5" />, text: ":::error\n**The mistake.** Why it goes wrong and what to do instead.\n:::", block: true, wrap: [":::error\n", "\n:::"] },
-  { label: "Error line", icon: <CircleX className="size-3.5" />, text: "::error Something that went wrong.", block: true, wrap: ["::error ", ""] },
-  { label: "Warn line", icon: <TriangleAlert className="size-3.5" />, text: "::warn Something to be careful about.", block: true, wrap: ["::warn ", ""] },
-  { label: "Tips line", icon: <Info className="size-3.5" />, text: "::tips Something helpful.", block: true, wrap: ["::tips ", ""] },
+  { label: "Error line", icon: <CircleX className="size-3.5" />, text: "::error\nSomething that went wrong.\n::", block: true, wrap: ["::error\n", "\n::"] },
+  { label: "Warn line", icon: <TriangleAlert className="size-3.5" />, text: "::warn\nSomething to be careful about.\n::", block: true, wrap: ["::warn\n", "\n::"] },
+  { label: "Tips line", icon: <Info className="size-3.5" />, text: "::tips\nSomething helpful.\n::", block: true, wrap: ["::tips\n", "\n::"] },
   {
     label: "Infobox",
     icon: <PanelRight className="size-3.5" />,

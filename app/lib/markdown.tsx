@@ -716,36 +716,43 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
     }
 
     /*
-     * "::error" opens a coloured rule that runs until a bare "::" closes it,
-     * mirroring how ":::" delimits a box. Text on the opening line is included,
-     * so a one-liner needs no terminator — an unclosed region simply runs to the
-     * end of the block, which is what a writer means by "the rest of this".
+     * "::error" on its own line opens a coloured rule that runs until a bare
+     * "::" closes it, mirroring how ":::" delimits a box. An unclosed region
+     * runs to the end of the block — "the rest of this".
+     *
+     * "::error some text" with text on the same line is a one-liner and ends
+     * there. Without that distinction a one-liner would silently swallow every
+     * following paragraph, since it has no terminator.
      */
     const lineTone = LINE_TONE_RE.exec(line.trim());
     if (lineTone) {
       const tone = lineTone[1];
+      const inlineText = lineTone[2].trim();
       const runLines: string[] = [];
-      if (lineTone[2].trim()) {
-        runLines.push(lineTone[2]);
-      }
       i++;
-      // Track nesting so an inner ::: box's own markers don't close this run.
-      let depth = 0;
-      while (i < lines.length) {
-        const current = lines[i];
-        const trimmed = current.trim();
-        if (depth === 0 && trimmed === "::") {
+
+      if (inlineText) {
+        runLines.push(inlineText);
+      } else {
+        // Track nesting so an inner ::: box's own markers don't close this run.
+        let depth = 0;
+        while (i < lines.length) {
+          const current = lines[i];
+          const trimmed = current.trim();
+          if (depth === 0 && trimmed === "::") {
+            i++;
+            break;
+          }
+          if (/^:::\s*[a-zA-Z]+/.test(trimmed)) {
+            depth++;
+          } else if (trimmed === ":::" && depth > 0) {
+            depth--;
+          }
+          runLines.push(current);
           i++;
-          break;
         }
-        if (/^:::\s*[a-zA-Z]+/.test(trimmed)) {
-          depth++;
-        } else if (trimmed === ":::" && depth > 0) {
-          depth--;
-        }
-        runLines.push(current);
-        i++;
       }
+
       out.push(
         <div key={bk("toneline", tone + runLines.join("\n"))} className={`note line-${tone}`}>
           {renderMarkdown(runLines.join("\n"), ctx)}
@@ -822,14 +829,22 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       continue;
     }
 
+    // A "::" with no open tone region is a stray terminator — drop it rather
+    // than render it as text.
+    if (line.trim() === "::") {
+      i++;
+      continue;
+    }
+
     const paraLines: string[] = [line];
     i++;
     while (
       i < lines.length &&
       lines[i].trim() &&
-      // "::" starts a tone line and ends the paragraph; a bare ":" does not.
-      !/^(```|:::|::(?:error|warn|good|tips|muted)\b|#|\^ |>|\||\s*[-*]\s|\s*\d+\.\s|!\[|-{3,}\s*$|\*{3,}\s*$)/.test(
-        lines[i]
+      // "::" opens or closes a tone region and ends the paragraph; a bare
+      // ":" (the inline tone marker) does not.
+      !/^(```|:::|::(?:error|warn|good|tips|muted)\b|::\s*$|#|\^ |>|\||\s*[-*]\s|\s*\d+\.\s|!\[|-{3,}\s*$|\*{3,}\s*$)/.test(
+        lines[i].trim()
       )
     ) {
       paraLines.push(lines[i]);
