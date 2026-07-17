@@ -330,6 +330,14 @@
   font-family: var(--font-mono);
   color: var(--text);
 }
+/* Syntax highlighting: keywords carry the accent, comments recede. */
+.wiki pre .k {
+  color: var(--waccent);
+}
+.wiki pre .cm {
+  color: var(--text-faint);
+  font-style: italic;
+}
 
 .wiki .callout {
   background: var(--surface);
@@ -359,6 +367,35 @@
   font-size: 18px;
   line-height: 1.5;
   font-weight: 500;
+}
+
+/*
+ * ":::quote" — displayed material that isn't code. Same surface as a code
+ * block but without the accent rule, and it wraps instead of scrolling: a
+ * horizontal scrollbar is right for code, wrong for prose.
+ */
+.wiki .quote-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 22px 24px;
+  margin: 24px 0;
+  box-shadow: var(--card-shadow);
+}
+.wiki .quote-box > :first-child {
+  margin-top: 0;
+}
+.wiki .quote-box > :last-child {
+  margin-bottom: 0;
+}
+.wiki .quote-box .label {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 600;
+  margin: 0 0 8px;
 }
 
 .wiki .note {

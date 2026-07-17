@@ -104,6 +104,60 @@ function blockKey(seen: Map<string, number>, kind: string, content: string): str
   return count === 0 ? base : `${base}#${count}`;
 }
 
+/*
+ * Syntax highlighting.
+ *
+ * One shared keyword set across languages rather than per-language grammars:
+ * the goal is to make structure scannable, not to be a compiler. A word that is
+ * a keyword in C# but an identifier in Python simply tints in both — harmless,
+ * and far cheaper than shipping real grammars to a static site.
+ */
+const CODE_KEYWORDS = new Set(
+  (
+    "abstract as async await base bool break byte case catch char checked class const continue decimal default " +
+    "delegate do double else enum event explicit extern false finally fixed float for foreach from get global goto " +
+    "if implicit in int interface internal is lock long namespace new null object operator out override params " +
+    "private protected public readonly ref return sbyte sealed set short sizeof stackalloc static string struct " +
+    "switch this throw true try typeof uint ulong unchecked unsafe ushort using var virtual void volatile while yield " +
+    "function let const export import default extends implements instanceof typeof undefined " +
+    "def elif except lambda None pass raise self True False and or not with"
+  ).split(" ")
+);
+
+/** Splits a line into keyword / comment / plain runs. */
+function highlightCode(text: string): React.ReactNode {
+  const out: React.ReactNode[] = [];
+  for (const [lineIndex, line] of text.split("\n").entries()) {
+    if (lineIndex > 0) {
+      out.push("\n");
+    }
+    // A comment swallows the rest of the line, so find it first.
+    const comment = /(^|[^:])(\/\/|#(?!\w)).*$/.exec(line);
+    const codePart = comment ? line.slice(0, comment.index + comment[1].length) : line;
+    const commentPart = comment ? line.slice(comment.index + comment[1].length) : "";
+
+    for (const token of codePart.split(/(\b[A-Za-z_]\w*\b)/)) {
+      if (CODE_KEYWORDS.has(token)) {
+        out.push(
+          <span key={k()} className="k">
+            {token}
+          </span>
+        );
+      } else if (token) {
+        out.push(token);
+      }
+    }
+    if (commentPart) {
+      out.push(
+        <span key={k()} className="cm">
+          {commentPart}
+        </span>
+      );
+    }
+  }
+  return out;
+}
+
 /**
  * Strips inline markers so a formatted caption can still be used as alt text,
  * which must be a plain string.
@@ -438,6 +492,19 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
         </div>
       );
     }
+    /*
+     * A bordered box with no coloured rule — for displayed material that isn't
+     * code: quotes, ASCII diagrams, worked examples. Unlike a code block it
+     * wraps rather than scrolling, and full formatting works inside.
+     */
+    case "quote": {
+      return (
+        <div key={k()} className="quote-box">
+          {dir.param && <p className="label">{dir.param}</p>}
+          {renderMarkdown(body.join("\n"), ctx)}
+        </div>
+      );
+    }
     case "error":
     case "pitfall":
     case "warn":
@@ -637,7 +704,7 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
               {file && <span className="lang">{lang}</span>}
             </div>
           )}
-          <pre>{codeLines.join("\n")}</pre>
+          <pre>{highlightCode(codeLines.join("\n"))}</pre>
         </div>
       );
       continue;
