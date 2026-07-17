@@ -53,7 +53,9 @@ export function NewPageDialog({
   }, [open, currentFolder]);
 
   const cleanName = normalizeSegment(name);
-  const rel = parent ? `${parent}/${cleanName}` : cleanName;
+  // Folders are always created at the project root; nest them by dragging.
+  // Pages honour the chosen location.
+  const rel = kind === "folder" ? cleanName : parent ? `${parent}/${cleanName}` : cleanName;
 
   const createFolder = async () => {
     const store = getStore();
@@ -123,21 +125,25 @@ export function NewPageDialog({
               ))}
             </div>
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="new-page-parent">Location</Label>
-            <select
-              id="new-page-parent"
-              value={parent}
-              onChange={(e) => setParent(e.target.value)}
-              className="h-9 w-full rounded-md border border-border bg-surface px-2 font-mono text-[13px] outline-none focus:ring-1 focus:ring-accent-line"
-            >
-              {folders.map((folder) => (
-                <option key={folder} value={folder}>
-                  {folder ? `${project}/${folder}` : project}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Folders always land at the project root — nest by dragging — so the
+              location picker only applies to pages. */}
+          {kind === "page" && (
+            <div className="grid gap-2">
+              <Label htmlFor="new-page-parent">Location</Label>
+              <select
+                id="new-page-parent"
+                value={parent}
+                onChange={(e) => setParent(e.target.value)}
+                className="h-9 w-full rounded-md border border-border bg-surface px-2 font-mono text-[13px] outline-none focus:ring-1 focus:ring-accent-line"
+              >
+                {folders.map((folder) => (
+                  <option key={folder} value={folder}>
+                    {folder ? `${project}/${folder}` : project}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="grid gap-2">
             <Label htmlFor="new-page-name">{kind === "page" ? "Page name" : "Folder name"}</Label>
             <Input

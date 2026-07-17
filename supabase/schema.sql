@@ -53,18 +53,26 @@ alter table pages    enable row level security;
 
 -- Reads: public rows to anyone, private rows only to a signed-in user.
 -- Anonymous clients do not receive private rows at all — not even their titles.
+-- `drop ... if exists` before each create keeps this file re-runnable on a live
+-- database: without it, re-running aborts with "policy already exists".
+drop policy if exists projects_read on projects;
 create policy projects_read on projects for select
   using (not is_private or auth.role() = 'authenticated');
+drop policy if exists folders_read on folders;
 create policy folders_read on folders for select
   using (not is_private or auth.role() = 'authenticated');
+drop policy if exists pages_read on pages;
 create policy pages_read on pages for select
   using (not is_private or auth.role() = 'authenticated');
 
 -- Writes: signed-in users only.
+drop policy if exists projects_write on projects;
 create policy projects_write on projects for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+drop policy if exists folders_write on folders;
 create policy folders_write on folders for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+drop policy if exists pages_write on pages;
 create policy pages_write on pages for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
@@ -81,14 +89,18 @@ insert into storage.buckets (id, name, public)
 values ('wiki-public', 'wiki-public', true), ('wiki-private', 'wiki-private', false)
 on conflict (id) do nothing;
 
+drop policy if exists wiki_public_read on storage.objects;
 create policy wiki_public_read on storage.objects for select
   using (bucket_id = 'wiki-public');
+drop policy if exists wiki_public_write on storage.objects;
 create policy wiki_public_write on storage.objects for all
   using (bucket_id = 'wiki-public' and auth.role() = 'authenticated')
   with check (bucket_id = 'wiki-public' and auth.role() = 'authenticated');
 
+drop policy if exists wiki_private_read on storage.objects;
 create policy wiki_private_read on storage.objects for select
   using (bucket_id = 'wiki-private' and auth.role() = 'authenticated');
+drop policy if exists wiki_private_write on storage.objects;
 create policy wiki_private_write on storage.objects for all
   using (bucket_id = 'wiki-private' and auth.role() = 'authenticated')
   with check (bucket_id = 'wiki-private' and auth.role() = 'authenticated');

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRevalidator } from "react-router";
-import { ChevronRight, FileText, FolderClosed, FolderOpen, GripVertical, Lock, Trash2, Unlock } from "lucide-react";
+import { ChevronRight, FileText, FolderClosed, FolderOpen, GripVertical, Lock, Pencil, Trash2, Unlock } from "lucide-react";
 import { getStore } from "~/lib/store";
 import {
   lastSegment,
+  normalizeSegment,
   parentOfRel,
   stripProjectPrefix,
   type PageMove,
@@ -108,6 +109,7 @@ function TreeItem({
   onDrop,
   onToggleLock,
   onDeleteFolder,
+  onContextMenu,
 }: {
   node: TreeNode;
   depth: number;
@@ -126,6 +128,7 @@ function TreeItem({
   onDrop: (node: TreeNode, e: React.DragEvent) => void;
   onToggleLock: (node: TreeNode, locked: boolean) => void;
   onDeleteFolder: (node: TreeNode) => void;
+  onContextMenu: (node: TreeNode, e: React.MouseEvent) => void;
 }) {
   const isActive = node.page && node.page.path.toLowerCase() === currentPath.toLowerCase();
   const isAncestor = currentPath.toLowerCase().startsWith(node.fullPath.toLowerCase() + "/");
@@ -182,6 +185,7 @@ function TreeItem({
         onDragEnd={onDragEnd}
         onDragOver={(e) => onDragOver(node, e)}
         onDrop={(e) => onDrop(node, e)}
+        onContextMenu={(e) => onContextMenu(node, e)}
         className={`group flex items-center rounded-md text-[13.5px] transition-opacity ${dropClass} ${
           isDragging ? "opacity-40" : ""
         } ${
@@ -259,6 +263,7 @@ function TreeItem({
               onDrop={onDrop}
               onToggleLock={onToggleLock}
               onDeleteFolder={onDeleteFolder}
+              onContextMenu={onContextMenu}
             />
           ))}
         </div>
@@ -286,6 +291,7 @@ export function PageTree({
   const [drag, setDrag] = useState<DragState | null>(null);
   const [over, setOver] = useState<OverState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
   const revalidator = useRevalidator();
   const navigate = useNavigate();
 
@@ -419,6 +425,55 @@ export function PageTree({
     await persist(next, moves, "Could not reorder the index.");
   };
 
+  /**
+   * Renames a page or folder in place. Like a move, but the final path segment
+   * changes rather than the parent: the new rel keeps the same parent folder and
+   * swaps the name. Reuses the same order/private/folders rekeying and page-move
+   * building as a drag, so descendant paths and wiki links follow along.
+   */
+  const renameNode = async (node: TreeNode, rawName: string) => {
+    if (busy) {
+      return;
+    }
+    const name = normalizeSegment(rawName);
+    if (!name || name === node.name) {
+      return;
+    }
+    const parent = parentOfRel(node.rel);
+    const newRel = parent ? `${parent}/${name}` : name;
+
+    if (childrenOf(parent).some((n) => n.rel !== node.rel && n.name.toLowerCase() === name.toLowerCase())) {
+      alert(`"${name}" already exists in that folder. Pick another name.`);
+      return;
+    }
+
+    const dragRel = node.rel;
+    const rekey = (key: string) => (key.startsWith(dragRel + "/") ? newRel + key.slice(dragRel.length) : key);
+
+    const nextOrder: Record<string, number> = {};
+    for (const [key, value] of Object.entries(local.order)) {
+      nextOrder[key === dragRel ? newRel : rekey(key)] = value;
+    }
+    const next: ProjectMeta = {
+      order: nextOrder,
+      private: local.private.map((rel) => (rel === dragRel ? newRel : rekey(rel))),
+      folders: local.folders.map((rel) => (rel === dragRel ? newRel : rekey(rel))),
+    };
+
+    const moves: PageMove[] = [];
+    const oldFull = `${project}/${dragRel}`;
+    const newFull = `${project}/${newRel}`;
+    for (const page of pages) {
+      if (page.path === oldFull) {
+        moves.push({ from: page.path, to: newFull });
+      } else if (page.path.startsWith(oldFull + "/")) {
+        moves.push({ from: page.path, to: newFull + page.path.slice(oldFull.length) });
+      }
+    }
+
+    await persist(next, moves, "Could not rename.");
+  };
+
   const toggleLock = async (node: TreeNode, locked: boolean) => {
     if (busy) {
       return;
@@ -488,6 +543,53 @@ export function PageTree({
     }
   };
 
+  /** Deletes a single page from the index (folders go through deleteFolder). */
+  const deletePageNode = async (node: TreeNode) => {
+    if (busy || !node.page) {
+      return;
+    }
+    if (!confirm(`Delete the page "${node.page.title}" permanently?\n\nThis cannot be undone.`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await getStore().deletePage(node.page.path);
+      revalidator.revalidate();
+      if (node.page.path.toLowerCase() === currentPath.toLowerCase()) {
+        navigate(`/${project}`, { replace: true });
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not delete the page.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openMenu = (node: TreeNode, e: React.MouseEvent) => {
+    if (!editUnlocked || node.rel === HOME) {
+      return;
+    }
+    e.preventDefault();
+    setMenu({ node, x: e.clientX, y: e.clientY });
+  };
+
+  const menuRename = (node: TreeNode) => {
+    setMenu(null);
+    const next = prompt(`Rename "${node.name}" to:`, node.name);
+    if (next !== null) {
+      void renameNode(node, next);
+    }
+  };
+
+  const menuDelete = (node: TreeNode) => {
+    setMenu(null);
+    if (node.page && !isFolderNode(node)) {
+      void deletePageNode(node);
+    } else {
+      void deleteFolder(node);
+    }
+  };
+
   const handleDrop = (node: TreeNode, e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -541,8 +643,41 @@ export function PageTree({
           onDrop={handleDrop}
           onToggleLock={toggleLock}
           onDeleteFolder={deleteFolder}
+          onContextMenu={openMenu}
         />
       ))}
+      {menu && (
+        <>
+          {/* Backdrop closes the menu on any outside click or a second right-click. */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-50 min-w-40 rounded-md border border-border bg-popover py-1 text-[13px] text-popover-foreground shadow-md"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            <button
+              type="button"
+              onClick={() => menuRename(menu.node)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent-soft hover:text-waccent"
+            >
+              <Pencil className="size-3.5" /> Rename
+            </button>
+            <button
+              type="button"
+              onClick={() => menuDelete(menu.node)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-crit hover:bg-crit/10"
+            >
+              <Trash2 className="size-3.5" /> Delete {menu.node.page && !isFolderNode(menu.node) ? "page" : "folder"}
+            </button>
+          </div>
+        </>
+      )}
       {editUnlocked && (
         <div
           onDragOver={(e) => {
