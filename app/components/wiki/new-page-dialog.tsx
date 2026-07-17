@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useRevalidator } from "react-router";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "~/components/ui/dialog";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { getStore } from "~/lib/store";
-import { normalizePath, stripProjectPrefix } from "~/lib/shared";
+import { folderList, normalizeSegment, stripProjectPrefix, type PageSummary, type ProjectMeta } from "~/lib/shared";
 
 type Kind = "page" | "folder";
 
@@ -14,18 +14,30 @@ export function NewPageDialog({
   onOpenChange,
   currentPath,
   project,
+  pages,
+  meta,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentPath: string;
   project: string;
+  pages: PageSummary[];
+  meta: ProjectMeta;
 }) {
   const navigate = useNavigate();
   const revalidator = useRevalidator();
-  const inProjectFolder = currentPath.includes("/") ? currentPath.split("/").slice(0, -1).join("/") + "/" : `${project}/`;
-  const folder = inProjectFolder.toLowerCase().startsWith(project.toLowerCase()) ? inProjectFolder : `${project}/`;
+  const folders = useMemo(() => folderList(pages, project, meta), [pages, project, meta]);
+
+  // Default to the folder the current page lives in.
+  const currentFolder = useMemo(() => {
+    const rel = stripProjectPrefix(currentPath);
+    const parent = rel.includes("/") ? rel.split("/").slice(0, -1).join("/") : "";
+    return folders.includes(parent) ? parent : "";
+  }, [currentPath, folders]);
+
   const [kind, setKind] = useState<Kind>("page");
-  const [path, setPath] = useState(folder);
+  const [parent, setParent] = useState(currentFolder);
+  const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -33,27 +45,27 @@ export function NewPageDialog({
   useEffect(() => {
     if (open) {
       setKind("page");
-      setPath(folder);
+      setParent(currentFolder);
+      setName("");
       setTitle("");
       setError("");
     }
-  }, [open, folder]);
+  }, [open, currentFolder]);
+
+  const cleanName = normalizeSegment(name);
+  const rel = parent ? `${parent}/${cleanName}` : cleanName;
 
   const createFolder = async () => {
     const store = getStore();
-    const rel = stripProjectPrefix(normalizePath(path));
-    if (!rel) {
-      throw new Error("Give the folder a name.");
-    }
-    const meta = await store.getMeta(project);
-    if (meta.folders.some((f) => f.toLowerCase() === rel.toLowerCase())) {
+    const existing = await store.getMeta(project);
+    if (folders.some((f) => f.toLowerCase() === rel.toLowerCase())) {
       throw new Error(`"${rel}" already exists.`);
     }
-    await store.saveMeta(project, { ...meta, folders: [...meta.folders, rel] });
+    await store.saveMeta(project, { ...existing, folders: [...existing.folders, rel] });
   };
 
   const submit = async () => {
-    if (!path.trim() || busy) {
+    if (!cleanName || busy) {
       return;
     }
     setBusy(true);
@@ -64,7 +76,7 @@ export function NewPageDialog({
         revalidator.revalidate();
         onOpenChange(false);
       } else {
-        const created = await getStore().createPage(path, title);
+        const created = await getStore().createPage(`${project}/${rel}`, title);
         revalidator.revalidate();
         onOpenChange(false);
         navigate(`/${created}`);
@@ -76,24 +88,21 @@ export function NewPageDialog({
     }
   };
 
+  const onEnter = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      submit();
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>New {kind}</DialogTitle>
           <DialogDescription>
-            {kind === "page" ? (
-              <>
-                The page is created immediately — the URL can be shared right away. Use{" "}
-                <span className="font-mono">/</span> for folders, e.g.{" "}
-                <span className="font-mono">{project}/Enemies/TheHunter</span>.
-              </>
-            ) : (
-              <>
-                An empty folder to organise pages into. Lock it from the index to put everything inside it behind the edit
-                password.
-              </>
-            )}
+            {kind === "page"
+              ? "The page is created immediately — the URL can be shared right away."
+              : "An empty folder to organise pages into. Drag it in the index to move it later."}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-2">
@@ -115,19 +124,36 @@ export function NewPageDialog({
             </div>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="new-page-path">Path</Label>
+            <Label htmlFor="new-page-parent">Location</Label>
+            <select
+              id="new-page-parent"
+              value={parent}
+              onChange={(e) => setParent(e.target.value)}
+              className="h-9 w-full rounded-md border border-border bg-surface px-2 font-mono text-[13px] outline-none focus:ring-1 focus:ring-accent-line"
+            >
+              {folders.map((folder) => (
+                <option key={folder} value={folder}>
+                  {folder ? `${project}/${folder}` : project}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="new-page-name">{kind === "page" ? "Page name" : "Folder name"}</Label>
             <Input
-              id="new-page-path"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder={kind === "page" ? "Enemies/TheHunter" : "Enemies"}
+              id="new-page-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={kind === "page" ? "TheHunter" : "Enemies"}
               className="font-mono"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  submit();
-                }
-              }}
+              autoFocus
+              onKeyDown={onEnter}
             />
+            {cleanName && (
+              <p className="font-mono text-[11.5px] text-text-faint">
+                /{project}/{rel}
+              </p>
+            )}
           </div>
           {kind === "page" && (
             <div className="grid gap-2">
@@ -137,11 +163,7 @@ export function NewPageDialog({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="The Hunter"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    submit();
-                  }
-                }}
+                onKeyDown={onEnter}
               />
             </div>
           )}
@@ -151,7 +173,7 @@ export function NewPageDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!path.trim() || busy}>
+          <Button onClick={submit} disabled={!cleanName || busy}>
             {busy ? "Creating…" : `Create ${kind}`}
           </Button>
         </DialogFooter>

@@ -122,7 +122,14 @@ export function Shell({
         </div>
         {children}
       </main>
-      <NewPageDialog open={newPageOpen} onOpenChange={setNewPageOpen} currentPath={currentPath} project={project} />
+      <NewPageDialog
+        open={newPageOpen}
+        onOpenChange={setNewPageOpen}
+        currentPath={currentPath}
+        project={project}
+        pages={pages}
+        meta={meta}
+      />
     </div>
   );
 }

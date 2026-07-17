@@ -69,6 +69,33 @@ export function isProjectPrivate(meta: RootMeta, slug: string): boolean {
   return meta.private.some((s) => s.toLowerCase() === slug.toLowerCase());
 }
 
+/**
+ * Every folder in a project, as project-relative paths, sorted. Combines the
+ * implicit folders (derived from page paths) with the explicitly created ones,
+ * so callers don't have to know that folders come from two places. The project
+ * root is the leading "" entry.
+ */
+export function folderList(pages: PageSummary[], project: string, meta: ProjectMeta): string[] {
+  const folders = new Set<string>([""]);
+  for (const page of pages) {
+    if (!pathInProject(page.path, project)) {
+      continue;
+    }
+    const segments = stripProjectPrefix(page.path).split("/");
+    // The last segment is the page itself, not a folder.
+    for (let i = 1; i < segments.length; i++) {
+      folders.add(segments.slice(0, i).join("/"));
+    }
+  }
+  for (const rel of meta.folders) {
+    const segments = rel.split("/");
+    for (let i = 1; i <= segments.length; i++) {
+      folders.add(segments.slice(0, i).join("/"));
+    }
+  }
+  return [...folders].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
 export interface PageMove {
   from: string;
   to: string;
@@ -125,6 +152,11 @@ export function newBlockId(): string {
   const bytes = new Uint8Array(5);
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** A single path segment — slashes are stripped, so it can never nest. */
+export function normalizeSegment(raw: string): string {
+  return normalizePath(raw.replace(/\//g, " "));
 }
 
 export function normalizePath(raw: string): string {
