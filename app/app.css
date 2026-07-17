@@ -376,6 +376,55 @@
 .wiki .note p {
   margin: 6px 0;
 }
+/*
+ * ":::errorline" and friends — a note with a coloured rule instead of a box.
+ * The rule carries the meaning; the text keeps its normal colour so it stays
+ * readable at length.
+ */
+.wiki .note.line-error {
+  border-left-color: var(--crit);
+}
+.wiki .note.line-warn {
+  border-left-color: var(--warn);
+}
+.wiki .note.line-good {
+  border-left-color: var(--good);
+}
+.wiki .note.line-tips {
+  border-left-color: var(--info);
+}
+.wiki .note.line-error .label {
+  color: var(--crit);
+}
+.wiki .note.line-warn .label {
+  color: var(--warn);
+}
+.wiki .note.line-good .label {
+  color: var(--good);
+}
+.wiki .note.line-tips .label {
+  color: var(--info);
+}
+
+/*
+ * "::error text" — colour applied to a run of text and nothing else, so it can
+ * be combined freely with bold, terms, links and variables.
+ */
+.wiki .tone-error {
+  color: var(--crit);
+}
+.wiki .tone-warn {
+  color: var(--warn);
+}
+.wiki .tone-good {
+  color: var(--good);
+}
+.wiki .tone-tips {
+  color: var(--info);
+}
+.wiki .tone-muted {
+  color: var(--text-faint);
+}
 
 /* Icon callouts: :::error, :::warn, :::good, :::tips */
 .wiki .callout-box {

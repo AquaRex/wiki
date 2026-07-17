@@ -1,16 +1,21 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRevalidator } from "react-router";
 import {
   ArrowDown,
   ArrowUp,
+  Baseline,
   Bold,
   Braces,
+  CircleCheck,
+  CircleX,
+  Code,
   Code2,
   GitBranch,
   Heading2,
   Heading3,
   Image as ImageIcon,
   Info,
+  Italic,
   Link2,
   ListOrdered,
   MessageSquareWarning,
@@ -32,16 +37,28 @@ import { getStore } from "~/lib/store";
 interface Snippet {
   label: string;
   icon: React.ReactNode;
+  /** Inserted when nothing is selected — doubles as a syntax example. */
   text: string;
+  /** [before, after] placed around the selection, when there is one. */
+  wrap?: [string, string];
   block?: boolean;
 }
 
 const SNIPPETS: Snippet[] = [
   { label: "Section", icon: <Heading2 className="size-3.5" />, text: "## Section title\n^ Optional kicker line\n\nBody text.", block: true },
   { label: "Subheading", icon: <Heading3 className="size-3.5" />, text: "### Subheading", block: true },
-  { label: "Bold", icon: <Bold className="size-3.5" />, text: "**bold**" },
-  { label: "Term", icon: <Sigma className="size-3.5" />, text: "==highlighted term==" },
-  { label: "Wiki link", icon: <Link2 className="size-3.5" />, text: "[[Enemies/Example|label]]" },
+  { label: "Bold", icon: <Bold className="size-3.5" />, text: "**bold**", wrap: ["**", "**"] },
+  { label: "Italic", icon: <Italic className="size-3.5" />, text: "*italic*", wrap: ["*", "*"] },
+  { label: "Code", icon: <Code className="size-3.5" />, text: "`code`", wrap: ["`", "`"] },
+  { label: "Term", icon: <Sigma className="size-3.5" />, text: "==highlighted term==", wrap: ["==", "=="] },
+  { label: "Subtext", icon: <Baseline className="size-3.5" />, text: "^ subtext", block: true },
+  { label: "Error", icon: <CircleX className="size-3.5" />, text: "::error text", wrap: ["::error ", ""] },
+  { label: "Warn", icon: <TriangleAlert className="size-3.5" />, text: "::warn text", wrap: ["::warn ", ""] },
+  { label: "Good", icon: <CircleCheck className="size-3.5" />, text: "::good text", wrap: ["::good ", ""] },
+  { label: "Tip", icon: <Info className="size-3.5" />, text: "::tips text", wrap: ["::tips ", ""] },
+  { label: "Muted", icon: <Baseline className="size-3.5" />, text: "::muted text", wrap: ["::muted ", ""] },
+  { label: "Wiki link", icon: <Link2 className="size-3.5" />, text: "[[Enemies/Example|label]]", wrap: ["[[", "]]"] },
+  { label: "Link", icon: <Link2 className="size-3.5" />, text: "[label](https://example.com)", wrap: ["[", "](https://example.com)"] },
   { label: "Var def", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What this variable controls}}" },
   { label: "Var ref", icon: <Braces className="size-3.5" />, text: "{{varName|shown text}}" },
   { label: "Value", icon: <Braces className="size-3.5" />, text: "{{0.57|why this value}}" },
@@ -53,9 +70,12 @@ const SNIPPETS: Snippet[] = [
     block: true,
   },
   { label: "Callout", icon: <Info className="size-3.5" />, text: ":::callout The core idea\nThe headline statement.\n\nSupporting detail.\n:::", block: true },
-  { label: "Note", icon: <MessageSquareWarning className="size-3.5" />, text: ":::note Worth knowing\nA side remark.\n:::", block: true },
-  { label: "Tips", icon: <Info className="size-3.5" />, text: ":::tips\n**The tip.** Something helpful that isn't obvious.\n:::", block: true },
-  { label: "Error", icon: <TriangleAlert className="size-3.5" />, text: ":::error\n**The mistake.** Why it goes wrong and what to do instead.\n:::", block: true },
+  { label: "Note", icon: <MessageSquareWarning className="size-3.5" />, text: ":::note Worth knowing\nA side remark.\n:::", block: true, wrap: [":::note\n", "\n:::"] },
+  { label: "Tips box", icon: <Info className="size-3.5" />, text: ":::tips\n**The tip.** Something helpful that isn't obvious.\n:::", block: true, wrap: [":::tips\n", "\n:::"] },
+  { label: "Error box", icon: <TriangleAlert className="size-3.5" />, text: ":::error\n**The mistake.** Why it goes wrong and what to do instead.\n:::", block: true, wrap: [":::error\n", "\n:::"] },
+  { label: "Error line", icon: <CircleX className="size-3.5" />, text: ":::errorline\nSomething that went wrong.\n:::", block: true, wrap: [":::errorline\n", "\n:::"] },
+  { label: "Warn line", icon: <TriangleAlert className="size-3.5" />, text: ":::warnline\nSomething to be careful about.\n:::", block: true, wrap: [":::warnline\n", "\n:::"] },
+  { label: "Tips line", icon: <Info className="size-3.5" />, text: ":::tipsline\nSomething helpful.\n:::", block: true, wrap: [":::tipsline\n", "\n:::"] },
   {
     label: "Infobox",
     icon: <PanelRight className="size-3.5" />,
@@ -102,13 +122,27 @@ function BlockEditorPanel({
 }) {
   const [draft, setDraft] = useState(block.text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   const { mutate, busy } = useMutatePage(pagePath);
 
+  /**
+   * Grows the textarea to fit its content without moving the page under the
+   * cursor. Two things would otherwise scroll it: collapsing the height to 0 to
+   * measure scrollHeight, and the live preview above changing height as you
+   * type. Both are absorbed by pinning the textarea's viewport position across
+   * the resize and correcting the scroll by however much it drifted.
+   */
   const autoGrow = () => {
     const el = textareaRef.current;
-    if (el) {
-      el.style.height = "0px";
-      el.style.height = el.scrollHeight + 4 + "px";
+    if (!el) {
+      return;
+    }
+    const before = el.getBoundingClientRect().top;
+    el.style.height = "0px";
+    el.style.height = el.scrollHeight + 4 + "px";
+    const drift = el.getBoundingClientRect().top - before;
+    if (drift !== 0) {
+      window.scrollBy({ top: drift, behavior: "instant" as ScrollBehavior });
     }
   };
 
@@ -122,6 +156,38 @@ function BlockEditorPanel({
     }
   };
 
+  /**
+   * The live preview sits above the textarea, so anything that changes its
+   * height — a new block, an image finishing loading — pushes the textarea
+   * down mid-keystroke. Watch it and hold the textarea still instead.
+   */
+  useEffect(() => {
+    const el = textareaRef.current;
+    const preview = previewRef.current;
+    if (!el || !preview) {
+      return;
+    }
+    let last = el.getBoundingClientRect().top;
+    const observer = new ResizeObserver(() => {
+      const now = el.getBoundingClientRect().top;
+      const drift = now - last;
+      // Only correct while the author is actually typing in this block.
+      if (drift !== 0 && document.activeElement === el) {
+        window.scrollBy({ top: drift, behavior: "instant" as ScrollBehavior });
+        last = el.getBoundingClientRect().top;
+      } else {
+        last = now;
+      }
+    });
+    observer.observe(preview);
+    return () => observer.disconnect();
+  }, []);
+
+  /**
+   * Applies a snippet. With text selected, a snippet that defines a wrap keeps
+   * the selection and formats around it; otherwise the snippet's sample text is
+   * inserted so the button still teaches the syntax.
+   */
   const insert = (snippet: Snippet) => {
     const el = textareaRef.current;
     if (!el) {
@@ -129,18 +195,38 @@ function BlockEditorPanel({
     }
     const start = el.selectionStart;
     const end = el.selectionEnd;
+    const selected = draft.slice(start, end);
     const before = draft.slice(0, start);
     const after = draft.slice(end);
-    let text = snippet.text;
-    if (snippet.block) {
-      text = (before && !before.endsWith("\n\n") ? (before.endsWith("\n") ? "\n" : "\n\n") : "") + text + (after.startsWith("\n") ? "" : "\n");
+
+    let text: string;
+    let selectFrom: number;
+    let selectTo: number;
+
+    if (selected && snippet.wrap) {
+      const [open, close] = snippet.wrap;
+      text = open + selected + close;
+      // Keep the original text selected, now inside its new markers.
+      selectFrom = start + open.length;
+      selectTo = selectFrom + selected.length;
+    } else {
+      text = snippet.text;
+      selectFrom = start + text.length;
+      selectTo = selectFrom;
     }
-    const next = before + text + after;
-    setDraft(next);
+
+    if (snippet.block) {
+      const lead = before && !before.endsWith("\n\n") ? (before.endsWith("\n") ? "\n" : "\n\n") : "";
+      const tail = after.startsWith("\n") ? "" : "\n";
+      text = lead + text + tail;
+      selectFrom += lead.length;
+      selectTo += lead.length;
+    }
+
+    setDraft(before + text + after);
     requestAnimationFrame(() => {
       el.focus();
-      const pos = start + text.length;
-      el.setSelectionRange(pos, pos);
+      el.setSelectionRange(selectFrom, selectTo);
       autoGrow();
     });
   };
@@ -168,7 +254,7 @@ function BlockEditorPanel({
 
   return (
     <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
-      <div className="wiki border-b border-border px-5 pb-4 pt-1">
+      <div ref={previewRef} className="wiki border-b border-border px-5 pb-4 pt-1">
         {renderMarkdown(draft, ctx, h2Start)}
         <div className="clear-both" />
       </div>

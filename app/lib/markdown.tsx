@@ -144,7 +144,11 @@ const INLINE_SRC = [
     "(\\*\\*.+?\\*\\*)", // 8 bold
     "(\\*[^*\\n]+\\*)", // 9 italic
     "(==[^=]+==)", // 10 accent term
+    "((?<!:)::(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 11 coloured inline run
 ].join("|");
+
+/** ::error / ::warn / ::good / ::tips / ::muted — colour only, to end of line. */
+const INLINE_TONE_RE = /^::(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
 
 const DEF_INNER_RE = /^\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^}]*?)\s*)?\}\}$/;
 
@@ -311,6 +315,14 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
           {renderInline(token.slice(2, -2), ctx)}
         </em>
       );
+    } else if (m[11]) {
+      // Colour only — the rest of the run keeps its own formatting.
+      const tm = INLINE_TONE_RE.exec(token)!;
+      out.push(
+        <span key={k()} className={`tone-${tm[1]}`}>
+          {renderInline(tm[2], ctx)}
+        </span>
+      );
     }
     last = m.index + token.length;
   }
@@ -375,8 +387,14 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
   const body = dir.lines;
   switch (dir.type) {
     case "callout":
-    case "note": {
-      const cls = dir.type === "callout" ? "callout core" : "note";
+    case "note":
+    case "errorline":
+    case "warnline":
+    case "goodline":
+    case "tipsline": {
+      // "...line" variants are a note with a coloured rule — no box.
+      const tone = /^(error|warn|good|tips)line$/.exec(dir.type)?.[1];
+      const cls = dir.type === "callout" ? "callout core" : tone ? `note line-${tone}` : "note";
       return (
         <div key={k()} className={cls}>
           {dir.param && <p className="label">{dir.param}</p>}
