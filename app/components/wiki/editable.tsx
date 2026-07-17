@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRevalidator } from "react-router";
 import { getStore } from "~/lib/store";
+import { renderMarkdown, type RenderContext } from "~/lib/markdown";
 import type { WikiPage } from "~/lib/shared";
 
 function applyField(page: WikiPage, field: string, value: string) {
@@ -24,6 +25,7 @@ export function EditableText({
   placeholder,
   multiline = false,
   as: Tag = "div",
+  markdown,
 }: {
   value: string;
   field: string;
@@ -33,6 +35,8 @@ export function EditableText({
   placeholder: string;
   multiline?: boolean;
   as?: React.ElementType;
+  /** Render the value as markdown when not editing, instead of plain text. */
+  markdown?: RenderContext;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -63,11 +67,13 @@ export function EditableText({
     }
   };
 
+  const rendered = markdown ? <div className="wiki">{renderMarkdown(value, markdown)}</div> : value;
+
   if (!editUnlocked) {
     if (!value) {
       return null;
     }
-    return <Tag className={className}>{value}</Tag>;
+    return <Tag className={className}>{rendered}</Tag>;
   }
 
   if (editing) {
@@ -98,7 +104,7 @@ export function EditableText({
       onClick={() => setEditing(true)}
       title="Click to edit"
     >
-      {value || placeholder}
+      {value ? rendered : placeholder}
     </Tag>
   );
 }

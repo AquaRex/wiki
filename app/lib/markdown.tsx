@@ -21,9 +21,9 @@ export interface RenderContext {
 }
 
 /**
- * Resolved image URLs, kept across renders. Without this the live preview
- * re-resolves every image on each keystroke, which blanks the images and makes
- * the page jump under the cursor.
+ * Resolved image URLs, kept across renders and across component instances.
+ * A remounted <Asset> reads its URL from here synchronously, so an image that
+ * has already been resolved once never flashes empty again.
  */
 const assetUrls = new Map<string, string>();
 
@@ -78,15 +78,30 @@ function Asset({ ctx, src, alt, className }: { ctx: RenderContext; src: string; 
 /**
  * Keys for rendered nodes.
  *
- * This counter is reset at the start of every top-level render, so the same
- * markdown always produces the same keys. That is what lets React reuse the
- * existing DOM instead of unmounting and rebuilding the whole preview on each
- * keystroke — which previously made images blink out, reload, and shove the
- * page around under the cursor while typing.
+ * Inline nodes are keyed positionally, which is fine: they are short-lived
+ * spans with no state or network cost, and they always re-render with their
+ * parent block anyway.
+ *
+ * Block-level nodes are keyed by content instead — see blockKey. A positional
+ * key would shift every following element when a line is added, remounting
+ * everything after the caret: images would refetch and flash, the page height
+ * would lurch, and the view would jump while typing.
  */
 let keyCounter = 0;
 function k(): number {
   return keyCounter++;
+}
+
+/**
+ * A stable key for a block-level node, derived from what it renders rather than
+ * where it sits. Identical content on the next render keeps the same DOM.
+ * The suffix disambiguates the rare case of two identical blocks in one parent.
+ */
+function blockKey(seen: Map<string, number>, kind: string, content: string): string {
+  const base = `${kind}:${content}`;
+  const count = seen.get(base) ?? 0;
+  seen.set(base, count + 1);
+  return count === 0 ? base : `${base}#${count}`;
 }
 
 /**
@@ -175,7 +190,9 @@ const INLINE_TONE_RE = /^:(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
 /** "::error text" — a coloured rule in front of the text, no box. */
 const LINE_TONE_RE = /^::(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
 
-const DEF_INNER_RE = /^\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^}]*?)\s*)?\}\}$/;
+// Mirrors DEF_RE in shared.ts — name, value, description, then the optional
+// "private" flag that keeps the definition out of the All variables index.
+const DEF_INNER_RE = /^\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}$/;
 
 function variableLink(ctx: RenderContext, name: string, label: React.ReactNode): React.ReactNode {
   const def = ctx.variables[name];
@@ -588,6 +605,9 @@ export function renderMarkdown(text: string, ctx: RenderContext, h2Start = 0): R
 function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.ReactNode {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const out: React.ReactNode[] = [];
+  // Content-derived keys, scoped to this parent — see blockKey.
+  const seen = new Map<string, number>();
+  const bk = (kind: string, content: string) => blockKey(seen, kind, content);
   let h2Index = h2Start;
   let i = 0;
 
@@ -610,7 +630,7 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       }
       i++;
       out.push(
-        <div key={k()} className="code">
+        <div key={bk("code", codeLines.join("\n"))} className="code">
           {(lang || file) && (
             <div className="file">
               <span>{file || lang}</span>
@@ -643,44 +663,45 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
         i++;
       }
       i++;
+      const dirType = headMatch ? headMatch[1].toLowerCase() : "note";
       out.push(
-        renderDirective(
-          {
-            type: headMatch ? headMatch[1].toLowerCase() : "note",
-            param: headMatch ? headMatch[2].trim() : "",
-            lines: dirLines,
-          },
-          ctx
-        )
+        // Wrapped so the box gets a content key — renderDirective's own key is
+        // positional, which would remount any image inside it while typing.
+        <React.Fragment key={bk("dir", dirType + dirLines.join("\n"))}>
+          {renderDirective(
+            { type: dirType, param: headMatch ? headMatch[2].trim() : "", lines: dirLines },
+            ctx
+          )}
+        </React.Fragment>
       );
       continue;
     }
 
     if (line.startsWith("#### ")) {
-      out.push(<Heading key={k()} level={4} text={line.slice(5)} ctx={ctx} />);
+      out.push(<Heading key={bk("h4", line)} level={4} text={line.slice(5)} ctx={ctx} />);
       i++;
       continue;
     }
     if (line.startsWith("### ")) {
-      out.push(<Heading key={k()} level={3} text={line.slice(4)} ctx={ctx} />);
+      out.push(<Heading key={bk("h3", line)} level={3} text={line.slice(4)} ctx={ctx} />);
       i++;
       continue;
     }
     if (line.startsWith("## ")) {
       h2Index++;
-      out.push(<Heading key={k()} level={2} text={line.slice(3)} ctx={ctx} num={h2Index} />);
+      out.push(<Heading key={bk("h2", line)} level={2} text={line.slice(3)} ctx={ctx} num={h2Index} />);
       i++;
       continue;
     }
     if (line.startsWith("# ")) {
-      out.push(<Heading key={k()} level={2} text={line.slice(2)} ctx={ctx} />);
+      out.push(<Heading key={bk("h1", line)} level={2} text={line.slice(2)} ctx={ctx} />);
       i++;
       continue;
     }
 
     if (line.startsWith("^ ")) {
       out.push(
-        <p key={k()} className="kicker">
+        <p key={bk("kicker", line)} className="kicker">
           {renderInline(line.slice(2), ctx)}
         </p>
       );
@@ -689,28 +710,44 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
     }
 
     if (/^(-{3,}|\*{3,})\s*$/.test(line)) {
-      out.push(<hr key={k()} />);
+      out.push(<hr key={bk("hr", String(i))} />);
       i++;
       continue;
     }
 
-    // "::error text" — a coloured rule in front, no box. Consecutive lines of
-    // the same tone form one run so a multi-line remark shares its rule.
+    /*
+     * "::error" opens a coloured rule that runs until a bare "::" closes it,
+     * mirroring how ":::" delimits a box. Text on the opening line is included,
+     * so a one-liner needs no terminator — an unclosed region simply runs to the
+     * end of the block, which is what a writer means by "the rest of this".
+     */
     const lineTone = LINE_TONE_RE.exec(line.trim());
     if (lineTone) {
       const tone = lineTone[1];
-      const runLines: string[] = [lineTone[2]];
+      const runLines: string[] = [];
+      if (lineTone[2].trim()) {
+        runLines.push(lineTone[2]);
+      }
       i++;
+      // Track nesting so an inner ::: box's own markers don't close this run.
+      let depth = 0;
       while (i < lines.length) {
-        const next = LINE_TONE_RE.exec(lines[i].trim());
-        if (!next || next[1] !== tone) {
+        const current = lines[i];
+        const trimmed = current.trim();
+        if (depth === 0 && trimmed === "::") {
+          i++;
           break;
         }
-        runLines.push(next[2]);
+        if (/^:::\s*[a-zA-Z]+/.test(trimmed)) {
+          depth++;
+        } else if (trimmed === ":::" && depth > 0) {
+          depth--;
+        }
+        runLines.push(current);
         i++;
       }
       out.push(
-        <div key={k()} className={`note line-${tone}`}>
+        <div key={bk("toneline", tone + runLines.join("\n"))} className={`note line-${tone}`}>
           {renderMarkdown(runLines.join("\n"), ctx)}
         </div>
       );
@@ -733,7 +770,9 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
         quoteLines.push(lines[i].replace(/^>\s?/, ""));
         i++;
       }
-      out.push(<blockquote key={k()}>{renderInline(quoteLines.join(" "), ctx)}</blockquote>);
+      out.push(
+        <blockquote key={bk("quote", quoteLines.join("\n"))}>{renderInline(quoteLines.join(" "), ctx)}</blockquote>
+      );
       continue;
     }
 
@@ -744,7 +783,7 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
         i++;
       }
       out.push(
-        <ul key={k()}>
+        <ul key={bk("ul", items.join("\n"))}>
           {items.map((item) => (
             <li key={k()}>{renderInline(item, ctx)}</li>
           ))}
@@ -760,7 +799,7 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
         i++;
       }
       out.push(
-        <ol key={k()}>
+        <ol key={bk("ol", items.join("\n"))}>
           {items.map((item) => (
             <li key={k()}>{renderInline(item, ctx)}</li>
           ))}
@@ -773,7 +812,8 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
     if (imgMatch) {
       const caption = imgMatch[1];
       out.push(
-        <figure key={k()} className="wk-img">
+        // Keyed by src so editing text elsewhere never remounts the image.
+        <figure key={bk("img", imgMatch[2])} className="wk-img">
           <Asset ctx={ctx} src={imgMatch[2]} alt={plainCaption(caption)} />
           {caption && <figcaption>{renderInline(caption, ctx)}</figcaption>}
         </figure>
@@ -797,7 +837,8 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
     }
     // Joined with newlines, not spaces: a line break the author typed is a line
     // break they meant. `.wiki p` preserves them via white-space: pre-line.
-    out.push(<p key={k()}>{renderInline(paraLines.join("\n"), ctx)}</p>);
+    const para = paraLines.join("\n");
+    out.push(<p key={bk("p", para)}>{renderInline(para, ctx)}</p>);
   }
 
   return <>{out}</>;

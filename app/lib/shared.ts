@@ -219,13 +219,28 @@ export function blankPage(rawPath: string, title?: string): WikiPage {
   };
 }
 
-export const DEF_RE = /\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^}]*?)\s*)?\}\}/g;
+/**
+ * {{def:name=value|description|private}}
+ *
+ * The trailing "private" flag keeps a definition local to its page: it still
+ * renders and can still be referenced there, but it is left out of the shared
+ * All variables index. Use it for names too generic to belong project-wide
+ * (array.length, i, temp) that would otherwise collide or add noise.
+ */
+export const DEF_RE = /\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}/g;
+
+export function isPrivateFlag(flag: string | undefined): boolean {
+  return (flag ?? "").trim().toLowerCase() === "private";
+}
 
 export function extractVariables(pages: WikiPage[]): Record<string, VariableDef> {
   const vars: Record<string, VariableDef> = {};
   for (const page of pages) {
     for (const block of page.blocks) {
       for (const match of block.text.matchAll(DEF_RE)) {
+        if (isPrivateFlag(match[4])) {
+          continue; // page-local — not part of the shared index
+        }
         vars[match[1]] = {
           name: match[1],
           value: match[2],

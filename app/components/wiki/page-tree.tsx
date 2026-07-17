@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRevalidator } from "react-router";
-import { ChevronRight, FileText, FolderClosed, FolderOpen, GripVertical, Lock, Unlock } from "lucide-react";
+import { ChevronRight, FileText, FolderClosed, FolderOpen, GripVertical, Lock, Trash2, Unlock } from "lucide-react";
 import { getStore } from "~/lib/store";
 import {
   lastSegment,
   parentOfRel,
+  stripProjectPrefix,
   type PageMove,
   type PageSummary,
   type ProjectMeta,
@@ -106,6 +107,7 @@ function TreeItem({
   onDragOver,
   onDrop,
   onToggleLock,
+  onDeleteFolder,
 }: {
   node: TreeNode;
   depth: number;
@@ -123,6 +125,7 @@ function TreeItem({
   onDragOver: (node: TreeNode, e: React.DragEvent) => void;
   onDrop: (node: TreeNode, e: React.DragEvent) => void;
   onToggleLock: (node: TreeNode, locked: boolean) => void;
+  onDeleteFolder: (node: TreeNode) => void;
 }) {
   const isActive = node.page && node.page.path.toLowerCase() === currentPath.toLowerCase();
   const isAncestor = currentPath.toLowerCase().startsWith(node.fullPath.toLowerCase() + "/");
@@ -220,6 +223,18 @@ function TreeItem({
             {lockedHere ? <Lock className="size-3" /> : <Unlock className="size-3" />}
           </button>
         )}
+        {/* Folders only — a page is deleted from its own header. */}
+        {draggable && !isHome && !node.page && isFolder && (
+          <button
+            type="button"
+            onClick={() => onDeleteFolder(node)}
+            title="Delete folder"
+            aria-label="Delete folder"
+            className="mr-1 flex size-5 shrink-0 items-center justify-center rounded text-text-faint opacity-0 hover:text-crit group-hover:opacity-100"
+          >
+            <Trash2 className="size-3" />
+          </button>
+        )}
         {canDrag && (
           <GripVertical className="mr-1 size-3 shrink-0 cursor-grab text-text-faint opacity-0 group-hover:opacity-100" />
         )}
@@ -243,6 +258,7 @@ function TreeItem({
               onDragOver={onDragOver}
               onDrop={onDrop}
               onToggleLock={onToggleLock}
+              onDeleteFolder={onDeleteFolder}
             />
           ))}
         </div>
@@ -416,6 +432,62 @@ export function PageTree({
     await persist(next, [], "Could not change the lock.");
   };
 
+  /**
+   * Deletes a folder. An empty folder is just a meta entry, so it goes quietly.
+   * A folder holding pages would take them with it, so that asks first and names
+   * the count — the pages are the part that can't be undone.
+   */
+  const deleteFolder = async (node: TreeNode) => {
+    if (busy) {
+      return;
+    }
+    const prefix = node.rel + "/";
+    const doomed = pages.filter((p) => {
+      const rel = stripProjectPrefix(p.path);
+      return rel.toLowerCase() === node.rel.toLowerCase() || rel.toLowerCase().startsWith(prefix.toLowerCase());
+    });
+
+    const message =
+      doomed.length > 0
+        ? `Delete "${node.rel}" and the ${doomed.length} page${doomed.length === 1 ? "" : "s"} inside it?\n\n` +
+          doomed.map((p) => `  ${stripProjectPrefix(p.path)}`).join("\n") +
+          "\n\nThis cannot be undone."
+        : `Delete the empty folder "${node.rel}"?`;
+    if (!confirm(message)) {
+      return;
+    }
+
+    const covered = (rel: string) =>
+      rel.toLowerCase() === node.rel.toLowerCase() || rel.toLowerCase().startsWith(prefix.toLowerCase());
+
+    const next: ProjectMeta = {
+      order: Object.fromEntries(Object.entries(local.order).filter(([rel]) => !covered(rel))),
+      private: local.private.filter((rel) => !covered(rel)),
+      folders: local.folders.filter((rel) => !covered(rel)),
+    };
+
+    const previous = local;
+    setLocal(next);
+    setBusy(true);
+    try {
+      const store = getStore();
+      for (const page of doomed) {
+        await store.deletePage(page.path);
+      }
+      await store.saveMeta(project, next);
+      revalidator.revalidate();
+      // Navigating away from a page that no longer exists.
+      if (doomed.some((p) => p.path.toLowerCase() === currentPath.toLowerCase())) {
+        navigate(`/${project}`, { replace: true });
+      }
+    } catch (e) {
+      setLocal(previous);
+      alert(e instanceof Error ? e.message : "Could not delete the folder.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleDrop = (node: TreeNode, e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -468,6 +540,7 @@ export function PageTree({
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           onToggleLock={toggleLock}
+          onDeleteFolder={deleteFolder}
         />
       ))}
       {editUnlocked && (

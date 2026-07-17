@@ -425,6 +425,19 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
     }
   }, [location.hash, location.key]);
 
+  // Built once per page rather than inline: a fresh ctx on every render would
+  // remount every image in the preview while typing.
+  const renderCtx = useMemo(
+    () => ({
+      variables: loaderData.variables ?? {},
+      pages: loaderData.allPages,
+      currentPath: loaderData.page?.path ?? loaderData.requestedPath,
+      project: loaderData.landing ? undefined : loaderData.project,
+      resolveAsset: (src: string) => store.resolveAsset(src),
+    }),
+    [loaderData, store]
+  );
+
   if (loaderData.landing) {
     return <Landing projects={loaderData.projects} />;
   }
@@ -492,7 +505,8 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
                 className="hero-lede mt-4"
                 placeholder="A one-paragraph summary of this page — what it covers and why it matters."
                 multiline
-                as="p"
+                as="div"
+                markdown={renderCtx}
               />
               <div className="mt-6">
                 {editUnlocked ? (
@@ -522,13 +536,7 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
             <BlockList
               blocks={page.blocks}
               pagePath={page.path}
-              ctx={{
-                variables,
-                pages: allPages,
-                currentPath: page.path,
-                project,
-                resolveAsset: (src) => store.resolveAsset(src),
-              }}
+              ctx={renderCtx}
               editUnlocked={editUnlocked}
             />
             {page.updated && (
