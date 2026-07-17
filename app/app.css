@@ -997,10 +997,9 @@
   overflow: hidden;
   cursor: grab;
   touch-action: none;
-  /* Dot grid, UE style. */
+  /* Dot grid, UE style. Size and position are set inline so it pans and zooms. */
   background-color: #0d1013;
   background-image: radial-gradient(circle, #20262c 1px, transparent 1px);
-  background-size: 24px 24px;
 }
 .wiki .ue-graph-viewport:active {
   cursor: grabbing;

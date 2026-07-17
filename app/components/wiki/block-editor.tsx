@@ -168,6 +168,12 @@ function BlockEditorPanel({
   const previewRef = useRef<HTMLDivElement>(null);
   const { mutate, busy } = useMutatePage(pagePath);
 
+  // A pasted Unreal graph is thousands of characters long. Let the textarea grow
+  // for ordinary prose, but cap it and scroll internally once a block carries one
+  // of these directives, so the huge text chunk doesn't swamp the editor.
+  const MAX_TEXTAREA_H = 360;
+  const isBulky = /^:::(blueprint|material)\b/m.test(draft);
+
   /**
    * Grows the textarea to fit its content. Measuring requires collapsing the
    * height first, which would scroll the page; pinning the element's viewport
@@ -181,7 +187,9 @@ function BlockEditorPanel({
     }
     const before = el.getBoundingClientRect().top;
     el.style.height = "0px";
-    el.style.height = el.scrollHeight + 4 + "px";
+    const full = el.scrollHeight + 4;
+    el.style.height = (isBulky ? Math.min(full, MAX_TEXTAREA_H) : full) + "px";
+    el.style.overflowY = isBulky && full > MAX_TEXTAREA_H ? "auto" : "hidden";
     const drift = el.getBoundingClientRect().top - before;
     if (drift !== 0) {
       window.scrollBy({ top: drift, behavior: "instant" as ScrollBehavior });
@@ -192,7 +200,9 @@ function BlockEditorPanel({
     (textareaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
     if (el && !el.dataset.mounted) {
       el.dataset.mounted = "1";
-      el.style.height = el.scrollHeight + 4 + "px";
+      const full = el.scrollHeight + 4;
+      el.style.height = (isBulky ? Math.min(full, MAX_TEXTAREA_H) : full) + "px";
+      el.style.overflowY = isBulky && full > MAX_TEXTAREA_H ? "auto" : "hidden";
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
     }

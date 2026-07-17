@@ -37,6 +37,11 @@ export interface UeNode {
   title: string;
   inputs: UePin[];
   outputs: UePin[];
+  /**
+   * The node's exact source slice, "Begin Object … End Object" verbatim. Kept so
+   * a selection of nodes can be copied back into Unreal unchanged.
+   */
+  raw: string;
 }
 
 export interface UeWire {
@@ -294,10 +299,14 @@ export function parseUeGraph(text: string): UeGraph {
       kindVote.material++;
     }
 
+    // Keep the untrimmed lines so the node can be re-emitted for Unreal exactly
+    // as it was pasted, including indentation.
+    const rawLines: string[] = [lines[i]];
     const headerLines: string[] = [];
     const pins: UePin[] = [];
     i++;
     while (i < lines.length && lines[i].trim() !== "End Object") {
+      rawLines.push(lines[i]);
       const body = lines[i].trim();
       if (body.startsWith("CustomProperties Pin")) {
         const pin = parsePin(body);
@@ -308,6 +317,9 @@ export function parseUeGraph(text: string): UeGraph {
         headerLines.push(body);
       }
       i++;
+    }
+    if (i < lines.length) {
+      rawLines.push(lines[i]); // the "End Object" line
     }
     i++; // consume "End Object"
 
@@ -323,6 +335,7 @@ export function parseUeGraph(text: string): UeGraph {
       title: nodeTitle(classLeaf, headerLines),
       inputs: pins.filter((p) => p.direction === "input" && !p.hidden),
       outputs: pins.filter((p) => p.direction === "output" && !p.hidden),
+      raw: rawLines.join("\n"),
     });
   }
 

@@ -1,6 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Copy, Check } from "lucide-react";
 import { parseUeGraph, type UeGraph, type UeNode, type UePin } from "~/lib/ueGraph";
+
+const GRID = 24;
 
 /*
  * A read-only, pan/zoom/select viewer for Unreal Engine node graphs pasted as
@@ -146,10 +148,26 @@ function PinRow({ pin, side }: { pin: UePin; side: "left" | "right" }) {
   );
 }
 
-function NodeBox({ p, selected }: { p: Placed; selected: boolean }) {
+function NodeBox({
+  p,
+  selected,
+  onSelect,
+}: {
+  p: Placed;
+  selected: boolean;
+  onSelect: (name: string, additive: boolean) => void;
+}) {
   const rows = Math.max(p.node.inputs.length, p.node.outputs.length);
   return (
     <div
+      onPointerDown={(e) => {
+        // Clicking a node selects it (Ctrl/Shift to add), rather than starting a
+        // marquee on the canvas behind it.
+        if (e.button === 0) {
+          e.stopPropagation();
+          onSelect(p.node.name, e.ctrlKey || e.shiftKey || e.metaKey);
+        }
+      }}
       style={{
         position: "absolute",
         left: p.x,
@@ -162,6 +180,7 @@ function NodeBox({ p, selected }: { p: Placed; selected: boolean }) {
         boxShadow: selected ? "0 0 0 2px rgba(255,179,0,0.5)" : "0 3px 10px rgba(0,0,0,0.5)",
         overflow: "hidden",
         userSelect: "none",
+        cursor: "pointer",
       }}
     >
       <div
@@ -238,8 +257,17 @@ export function UnrealGraph({ source }: { source: string }) {
   const [copied, setCopied] = useState(false);
   const pan = useRef<{ startX: number; startY: number; viewX: number; viewY: number } | null>(null);
 
-  // Resolve the view lazily so we can fit to the measured viewport on first paint.
-  const current = view ?? (wrapRef.current ? fitView(placed, wrapRef.current.clientWidth, wrapRef.current.clientHeight) : { x: 0, y: 0, scale: 1 });
+  // Fit the graph into the measured viewport once it has mounted, and again if a
+  // fresh paste comes in. Runs before paint so the graph never flashes at 0,0.
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (el) {
+      setView(fitView(placed, el.clientWidth, el.clientHeight));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source]);
+
+  const current = view ?? { x: 0, y: 0, scale: 1 };
 
   const toCanvas = (clientX: number, clientY: number) => {
     const rect = wrapRef.current!.getBoundingClientRect();
@@ -315,9 +343,37 @@ export function UnrealGraph({ source }: { source: string }) {
     pan.current = null;
   };
 
+  const toggleSelect = (name: string, additive: boolean) => {
+    setSelection((prev) => {
+      if (additive) {
+        const next = new Set(prev);
+        if (next.has(name)) {
+          next.delete(name);
+        } else {
+          next.add(name);
+        }
+        return next;
+      }
+      // Plain click on the only selected node clears it; otherwise selects just it.
+      if (prev.size === 1 && prev.has(name)) {
+        return new Set();
+      }
+      return new Set([name]);
+    });
+  };
+
+  // Copy the selected nodes back out for Unreal — or the whole graph when nothing
+  // is selected. Each node keeps its exact source, so the result pastes cleanly.
   const copy = async () => {
+    let text = source;
+    if (selection.size > 0) {
+      text = graph.nodes
+        .filter((n) => selection.has(n.name))
+        .map((n) => n.raw)
+        .join("\n");
+    }
     try {
-      await navigator.clipboard.writeText(source);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -339,10 +395,20 @@ export function UnrealGraph({ source }: { source: string }) {
         <span className="ue-graph-kind">{graph.kind === "material" ? "Material" : "Blueprint"}</span>
         <span className="ue-graph-count">
           {graph.nodes.length} nodes · {graph.wires.length} links
+          {selection.size > 0 && ` · ${selection.size} selected`}
         </span>
-        <button type="button" onClick={copy} className="ue-graph-copy" title="Copy the original text back for Unreal">
+        <button
+          type="button"
+          onClick={copy}
+          className="ue-graph-copy"
+          title={
+            selection.size > 0
+              ? "Copy the selected nodes back for Unreal"
+              : "Copy the whole graph back for Unreal"
+          }
+        >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? "Copied" : "Copy"}
+          {copied ? "Copied" : selection.size > 0 ? `Copy ${selection.size}` : "Copy all"}
         </button>
       </div>
       <div
@@ -354,6 +420,12 @@ export function UnrealGraph({ source }: { source: string }) {
         onPointerUp={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
         onDoubleClick={() => setView(fitView(placed, wrapRef.current!.clientWidth, wrapRef.current!.clientHeight))}
+        // The dot grid rides the pan/zoom so movement is visible: its size scales
+        // with zoom and its origin tracks the canvas translation.
+        style={{
+          backgroundSize: `${GRID * current.scale}px ${GRID * current.scale}px`,
+          backgroundPosition: `${current.x}px ${current.y}px`,
+        }}
       >
         <div
           className="ue-graph-canvas"
@@ -385,7 +457,12 @@ export function UnrealGraph({ source }: { source: string }) {
             })}
           </svg>
           {placed.map((p) => (
-            <NodeBox key={p.node.name} p={p} selected={selection.has(p.node.name)} />
+            <NodeBox
+              key={p.node.name}
+              p={p}
+              selected={selection.has(p.node.name)}
+              onSelect={toggleSelect}
+            />
           ))}
           {marquee && (
             <div
