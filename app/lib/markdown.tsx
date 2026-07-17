@@ -158,6 +158,35 @@ function highlightCode(text: string): React.ReactNode {
   return out;
 }
 
+export type ImageAlign = "left" | "right" | "wrap-left" | "wrap-right" | "none";
+
+/**
+ * Alignment rides on the end of the image URL, so it stays inside the ordinary
+ * image syntax and every existing image keeps working:
+ *
+ *   ![cap](/x.png)      default — block figure, or inline in a heading
+ *   ![cap](/x.png <)    pinned left
+ *   ![cap](/x.png >)    pinned right
+ *   ![cap](/x.png <<)   floated left, text wraps around it
+ *   ![cap](/x.png >>)   floated right, text wraps around it
+ */
+function splitImageAlign(src: string): { src: string; align: ImageAlign } {
+  const match = /^(.*?)\s*(<|>)\s*$/.exec(src);
+  if (!match) {
+    return { src: src.trim(), align: "none" };
+  }
+  const align = match[2] === "<" ? "left" : "right";
+  return { src: match[1].trim(), align };
+}
+
+const ALIGN_CLASS: Record<ImageAlign, string> = {
+  left: "align-left",
+  right: "align-right",
+  "wrap-left": "wrap-left",
+  "wrap-right": "wrap-right",
+  none: "",
+};
+
 /**
  * Strips inline markers so a formatted caption can still be used as alt text,
  * which must be a plain string.
@@ -393,7 +422,9 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
       );
     } else if (m[6]) {
       const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(token)!;
-      out.push(<Asset key={k()} ctx={ctx} src={im[2]} alt={im[1]} className="wk-inline-img" />);
+      const { src: imgSrc, align } = splitImageAlign(im[2]);
+      const inlineClass = align === "none" ? "wk-inline-img" : `wk-inline-img ${ALIGN_CLASS[align]}`;
+      out.push(<Asset key={k()} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} />);
     } else if (m[7]) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!;
       out.push(
@@ -463,11 +494,14 @@ function Heading({
 }) {
   const { text: label, image } = splitHeadingImage(text);
   const Tag = (level === 4 ? "h4" : level === 3 ? "h3" : "h2") as React.ElementType;
+  // A heading image pins right by default; "<" pins it left, next to the title.
+  const aligned = image ? splitImageAlign(image.src) : null;
+  const headImgClass = aligned && aligned.align === "left" ? "wk-h-img align-left" : "wk-h-img";
   return (
     <Tag className={level === 2 ? "wk-h2" : "wk-h3"} id={slugify(label)}>
       {num !== undefined && <span className="num">{String(num).padStart(2, "0")}</span>}
       <span>{renderInline(label, ctx)}</span>
-      {image && <Asset ctx={ctx} src={image.src} alt={image.alt} className="wk-h-img" />}
+      {image && aligned && <Asset ctx={ctx} src={aligned.src} alt={image.alt} className={headImgClass} />}
     </Tag>
   );
 }
@@ -885,10 +919,12 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
     const imgMatch = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(line.trim());
     if (imgMatch) {
       const caption = imgMatch[1];
+      const { src: imgSrc, align } = splitImageAlign(imgMatch[2]);
+      const figClass = align === "none" ? "wk-img" : `wk-img ${ALIGN_CLASS[align]}`;
       out.push(
         // Keyed by src so editing text elsewhere never remounts the image.
-        <figure key={bk("img", imgMatch[2])} className="wk-img">
-          <Asset ctx={ctx} src={imgMatch[2]} alt={plainCaption(caption)} />
+        <figure key={bk("img", imgSrc)} className={figClass}>
+          <Asset ctx={ctx} src={imgSrc} alt={plainCaption(caption)} />
           {caption && <figcaption>{renderInline(caption, ctx)}</figcaption>}
         </figure>
       );

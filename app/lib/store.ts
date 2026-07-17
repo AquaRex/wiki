@@ -53,6 +53,7 @@ interface PageRow {
   project_slug: string;
   rel: string;
   title: string;
+  header: string;
   eyebrow: string;
   lede: string;
   tags: string[];
@@ -66,6 +67,7 @@ function rowToPage(row: PageRow): WikiPage {
   return {
     path: `${row.project_slug}/${row.rel}`,
     title: row.title,
+    header: row.header ?? "",
     eyebrow: row.eyebrow,
     lede: row.lede,
     tags: row.tags ?? [],
@@ -151,6 +153,7 @@ class SupabaseStore implements WikiStore {
       .from("pages")
       .update({
         title: page.title,
+        header: page.header,
         eyebrow: page.eyebrow,
         lede: page.lede,
         tags: page.tags,

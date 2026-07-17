@@ -30,6 +30,7 @@ create table if not exists pages (
   project_slug text not null references projects(slug) on delete cascade,
   rel          text not null,
   title        text not null default '',
+  header       text not null default '',
   eyebrow      text not null default '',
   lede         text not null default '',
   tags         text[] not null default '{}',
@@ -39,6 +40,9 @@ create table if not exists pages (
   updated_at   timestamptz not null default now(),
   unique (project_slug, rel)
 );
+
+-- Added after initial launch; `if not exists` keeps re-runs safe on a live table.
+alter table pages add column if not exists header text not null default '';
 
 create index if not exists pages_project_idx on pages (project_slug);
 create index if not exists folders_project_idx on folders (project_slug);

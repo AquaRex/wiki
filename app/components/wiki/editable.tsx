@@ -7,6 +7,8 @@ import type { WikiPage } from "~/lib/shared";
 function applyField(page: WikiPage, field: string, value: string) {
   if (field === "title") {
     page.title = value;
+  } else if (field === "header") {
+    page.header = value;
   } else if (field === "eyebrow") {
     page.eyebrow = value;
   } else if (field === "lede") {

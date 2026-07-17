@@ -672,9 +672,35 @@
 .wiki .wk-h3 .wk-h-img {
   max-height: 1.7em;
 }
+/* "<" pins the heading image left, right after the title, instead of far right. */
+.wiki .wk-h-img.align-left {
+  margin-left: 12px;
+}
 
 .wiki .wk-inline-img {
   max-width: 100%;
+}
+.wiki .wk-inline-img.align-left {
+  display: block;
+  margin-right: auto;
+}
+.wiki .wk-inline-img.align-right {
+  display: block;
+  margin-left: auto;
+}
+
+/* A block figure pinned to one side of the content column. */
+.wiki .wk-img.align-left {
+  margin-left: 0;
+  margin-right: auto;
+}
+.wiki .wk-img.align-right {
+  margin-left: auto;
+  margin-right: 0;
+}
+.wiki .wk-img.align-left img,
+.wiki .wk-img.align-right img {
+  display: inline-block;
 }
 
 .wiki .wk-img {

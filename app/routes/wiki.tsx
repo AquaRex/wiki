@@ -16,6 +16,7 @@ import {
   type WikiPage,
 } from "~/lib/shared";
 import { getStore } from "~/lib/store";
+import { renderMarkdown } from "~/lib/markdown";
 import { useAuth } from "~/lib/auth";
 import { useProjectMeta, useRootMeta } from "~/lib/meta";
 import { wikiConfig } from "~/wiki.config";
@@ -488,15 +489,38 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
                   </Button>
                 )}
               </div>
-              <EditableText
-                value={page.title}
-                field="title"
-                pagePath={page.path}
-                editUnlocked={editUnlocked}
-                className="hero-title mt-4 font-heading"
-                placeholder="Page title"
-                as="h1"
-              />
+              {/* The page name — drives the URL, sidebar and index. Only surfaced
+                  when editing; the header below is what readers see. */}
+              {editUnlocked && (
+                <EditableText
+                  value={page.title}
+                  field="title"
+                  pagePath={page.path}
+                  editUnlocked={editUnlocked}
+                  className="mt-4 font-mono text-[12.5px] text-text-dim"
+                  placeholder="Page name (used in the URL and index)"
+                />
+              )}
+              {/* The big header. Falls back to the page name when empty, so a
+                  reader always sees a heading even if none was set. */}
+              {editUnlocked ? (
+                <EditableText
+                  value={page.header}
+                  field="header"
+                  pagePath={page.path}
+                  editUnlocked={editUnlocked}
+                  className="hero-title mt-2 font-heading"
+                  placeholder={`Header (defaults to “${page.title}”) — text or ![](image)`}
+                  as="div"
+                  markdown={renderCtx}
+                />
+              ) : page.header ? (
+                <div className="hero-title mt-4 font-heading wiki">
+                  {renderMarkdown(page.header, renderCtx)}
+                </div>
+              ) : (
+                <h1 className="hero-title mt-4 font-heading">{page.title}</h1>
+              )}
               <EditableText
                 value={page.lede}
                 field="lede"

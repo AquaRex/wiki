@@ -5,7 +5,13 @@ export interface WikiBlock {
 
 export interface WikiPage {
   path: string;
+  /** The page name — drives the URL, sidebar and index. */
   title: string;
+  /**
+   * The big H1 shown on the page. May be plain text or image markdown
+   * ("![](logo.png)"). Empty means fall back to the title.
+   */
+  header: string;
   eyebrow: string;
   lede: string;
   tags: string[];
@@ -211,6 +217,7 @@ export function blankPage(rawPath: string, title?: string): WikiPage {
   return {
     path: pagePath,
     title: title?.trim() || pagePath.split("/").pop()!.replace(/-/g, " "),
+    header: "",
     eyebrow: pagePath.split("/").slice(0, -1).join(" · "),
     lede: "",
     tags: [],
