@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Copy, Check } from "lucide-react";
-import { parseUeGraph, type UeGraph, type UeNode, type UePin } from "~/lib/ueGraph";
+import { parseUeGraph, type UeGraph, type UeNode, type UePin, type UeRole } from "~/lib/ueGraph";
 
 const GRID = 24;
 
@@ -19,28 +19,38 @@ const GRID = 24;
 
 const HEADER_H = 30;
 const PIN_ROW_H = 22;
+/** Vertical padding above the first pin row — shared by layout and wire anchors. */
+const PINS_TOP = 5;
 const PIN_PAD = 10;
 const NODE_MIN_W = 150;
 const CHAR_W = 7.5;
+const DOT = 10;
 
-/** UE-ish pin/wire colours by PinType.PinCategory. */
+/*
+ * Exact Unreal pin/wire colours by PinType.PinCategory. Structs share one
+ * category ("struct") but Vector/Rotator/Transform are tinted by their
+ * PinSubCategoryObject — see STRUCT_COLOR.
+ */
 const PIN_COLOR: Record<string, string> = {
-  exec: "#e8e8e8",
-  bool: "#8b0000",
-  byte: "#006e6e",
-  int: "#1fe4b7",
-  int64: "#8be9b0",
-  real: "#a6ff00",
-  float: "#a6ff00",
-  double: "#a6ff00",
+  exec: "#f0f0f0",
+  bool: "#950000",
+  byte: "#006f65",
+  int: "#1fe3af",
+  int64: "#ace3af",
+  real: "#38d500",
+  float: "#38d500",
+  double: "#38d500",
+  name: "#cd82ff",
   string: "#ff00d4",
-  name: "#c88fff",
-  text: "#e4a6ff",
-  struct: "#0088ff",
-  object: "#3737ff",
-  class: "#8b53d6",
+  text: "#e77caa",
+  struct: "#0059cb",
+  object: "#00aaf5",
+  class: "#5900bc",
+  softobject: "#95ffff",
+  softclass: "#ff95ff",
+  interface: "#f1ffaa",
+  enum: "#006f65",
   delegate: "#ff2b2b",
-  interface: "#ffb300",
   // Material graph pin categories.
   materialinput: "#d0d0d0",
   optional: "#7f9f7f",
@@ -48,27 +58,48 @@ const PIN_COLOR: Record<string, string> = {
   mask: "#c8c8c8",
 };
 
-function pinColor(category: string): string {
+/** Struct pins UE tints by their concrete type rather than the generic struct blue. */
+const STRUCT_COLOR: Record<string, string> = {
+  Vector: "#ffca23",
+  Vector3f: "#ffca23",
+  Rotator: "#a0b4ff",
+  Transform: "#ff7300",
+};
+
+function pinColor(pin: { category: string; subType: string }): string {
+  if (pin.category === "struct" && STRUCT_COLOR[pin.subType]) {
+    return STRUCT_COLOR[pin.subType];
+  }
   // Material data pins often have an empty category — treat as a neutral wire.
-  return PIN_COLOR[category] ?? "#c0c4c8";
+  return PIN_COLOR[pin.category] ?? "#c0c4c8";
 }
 
-/** Header tint by node kind — a rough nod to UE's node-title colours. */
+/** Header tint by the node's role — matches UE's title-bar colouring. */
+const ROLE_HEADER: Record<UeRole, string> = {
+  event: "#8c1f1e",
+  pure: "#6b9065",
+  function: "#5b819b",
+  macro: "#949594",
+  "variable-get": "#5b819b",
+  "variable-set": "#5b819b",
+  flow: "#5b819b",
+  material: "#3a3a5a",
+  other: "#22303c",
+};
+
 function headerColor(node: UeNode): string {
-  const c = node.classLeaf;
-  if (c === "K2Node_Event") {
-    return "#7a1f1f";
-  }
-  if (c === "K2Node_IfThenElse" || c === "K2Node_ExecutionSequence") {
-    return "#3a4a5a";
-  }
-  if (c === "K2Node_VariableGet" || c === "K2Node_VariableSet") {
-    return "#1f5a3a";
-  }
-  if (c.startsWith("MaterialExpression")) {
-    return "#3a3a5a";
-  }
-  return "#22303c";
+  return ROLE_HEADER[node.role] ?? ROLE_HEADER.other;
+}
+
+/** A variable Get renders as a compact coloured pill, not a full node. */
+function isPill(node: UeNode): boolean {
+  return node.role === "variable-get";
+}
+
+/** The variable's type colour — from the Get node's single output pin. */
+function pillColor(node: UeNode): string {
+  const out = node.outputs[0];
+  return out ? pinColor(out) : "#c0c4c8";
 }
 
 interface Placed {
@@ -79,7 +110,16 @@ interface Placed {
   h: number;
 }
 
+/** The bare variable name for a Get pill — "Get FooBar" -> "FooBar". */
+function pillLabel(node: UeNode): string {
+  return node.title.replace(/^Get\s+/, "");
+}
+
 function nodeWidth(node: UeNode): number {
+  if (isPill(node)) {
+    // Name text + a pin dot at each end.
+    return Math.max(56, pillLabel(node).length * CHAR_W + 34);
+  }
   const rows = Math.max(node.inputs.length, node.outputs.length);
   const titleW = node.title.length * CHAR_W + 28;
   let pinW = 0;
@@ -92,8 +132,11 @@ function nodeWidth(node: UeNode): number {
 }
 
 function nodeHeight(node: UeNode): number {
+  if (isPill(node)) {
+    return 30;
+  }
   const rows = Math.max(node.inputs.length, node.outputs.length);
-  return HEADER_H + rows * PIN_ROW_H + PIN_PAD;
+  return HEADER_H + PINS_TOP + rows * PIN_ROW_H + PIN_PAD;
 }
 
 function place(graph: UeGraph): { placed: Placed[]; byName: Map<string, Placed> } {
@@ -110,30 +153,47 @@ function place(graph: UeGraph): { placed: Placed[]; byName: Map<string, Placed> 
 
 /** Anchor point (canvas coords) for a pin on a placed node. */
 function pinAnchor(p: Placed, pinId: string): { x: number; y: number; cat: string } | null {
+  // A pill-rendered node (variable Get) has no pin rows — anchor at its middle.
+  if (isPill(p.node)) {
+    return { x: p.x + p.w, y: p.y + p.h / 2, cat: p.node.outputs[0]?.category ?? "" };
+  }
+  const rowY = (idx: number) => p.y + HEADER_H + PINS_TOP + idx * PIN_ROW_H + PIN_ROW_H / 2;
   const inIdx = p.node.inputs.findIndex((pin) => pin.id === pinId);
   if (inIdx !== -1) {
-    return { x: p.x, y: p.y + HEADER_H + inIdx * PIN_ROW_H + PIN_ROW_H / 2, cat: p.node.inputs[inIdx].category };
+    return { x: p.x, y: rowY(inIdx), cat: p.node.inputs[inIdx].category };
   }
   const outIdx = p.node.outputs.findIndex((pin) => pin.id === pinId);
   if (outIdx !== -1) {
-    return { x: p.x + p.w, y: p.y + HEADER_H + outIdx * PIN_ROW_H + PIN_ROW_H / 2, cat: p.node.outputs[outIdx].category };
+    return { x: p.x + p.w, y: rowY(outIdx), cat: p.node.outputs[outIdx].category };
   }
   return null;
 }
 
 function PinRow({ pin, side }: { pin: UePin; side: "left" | "right" }) {
-  const color = pinColor(pin.category);
-  const dot = (
+  const color = pinColor(pin);
+  const isExec = pin.category === "exec";
+  // Exec pins are the hollow arrow/triangle; data pins are the filled circle.
+  const dot = isExec ? (
     <span
       aria-hidden
       style={{
-        width: 9,
-        height: 9,
+        width: 0,
+        height: 0,
         flex: "none",
-        borderRadius: pin.category === "exec" ? 1 : 9,
-        background: pin.category === "exec" ? "transparent" : color,
-        border: `2px solid ${color}`,
-        transform: pin.category === "exec" ? "rotate(0deg)" : undefined,
+        borderTop: `${DOT / 2}px solid transparent`,
+        borderBottom: `${DOT / 2}px solid transparent`,
+        borderLeft: `${DOT}px solid ${color}`,
+      }}
+    />
+  ) : (
+    <span
+      aria-hidden
+      style={{
+        width: DOT,
+        height: DOT,
+        flex: "none",
+        borderRadius: DOT,
+        background: color,
       }}
     />
   );
@@ -163,17 +223,53 @@ function NodeBox({
   selected: boolean;
   onSelect: (name: string, additive: boolean) => void;
 }) {
+  const onDown = (e: React.PointerEvent) => {
+    // Clicking a node selects it (Ctrl/Shift to add), rather than starting a
+    // marquee on the canvas behind it.
+    if (e.button === 0) {
+      e.stopPropagation();
+      onSelect(p.node.name, e.ctrlKey || e.shiftKey || e.metaKey);
+    }
+  };
+
+  // A variable Get is a compact coloured pill with just the variable name.
+  if (isPill(p.node)) {
+    const color = pillColor(p.node);
+    return (
+      <div
+        onPointerDown={onDown}
+        title={p.node.title}
+        style={{
+          position: "absolute",
+          left: p.x,
+          top: p.y,
+          width: p.w,
+          height: p.h,
+          borderRadius: p.h / 2,
+          background: color,
+          border: `1px solid ${selected ? "#ffb300" : "rgba(0,0,0,0.5)"}`,
+          boxShadow: selected ? "0 0 0 2px rgba(255,179,0,0.6)" : "0 2px 6px rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "0 12px",
+          color: "#0b0e10",
+          fontSize: 12,
+          fontWeight: 700,
+          whiteSpace: "nowrap",
+          userSelect: "none",
+          cursor: "pointer",
+        }}
+      >
+        {pillLabel(p.node)}
+      </div>
+    );
+  }
+
   const rows = Math.max(p.node.inputs.length, p.node.outputs.length);
   return (
     <div
-      onPointerDown={(e) => {
-        // Clicking a node selects it (Ctrl/Shift to add), rather than starting a
-        // marquee on the canvas behind it.
-        if (e.button === 0) {
-          e.stopPropagation();
-          onSelect(p.node.name, e.ctrlKey || e.shiftKey || e.metaKey);
-        }
-      }}
+      onPointerDown={onDown}
       style={{
         position: "absolute",
         left: p.x,
@@ -204,7 +300,7 @@ function NodeBox({
       >
         {p.node.title}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", padding: "5px 0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", padding: `${PINS_TOP}px 0` }}>
         <div>
           {p.node.inputs.map((pin) => (
             <PinRow key={pin.id} pin={pin} side="left" />
@@ -486,7 +582,7 @@ export function UnrealGraph({ source }: { source: string }) {
                   key={idx}
                   d={`M ${a.x} ${a.y} C ${a.x + dx} ${a.y}, ${b.x - dx} ${b.y}, ${b.x} ${b.y}`}
                   fill="none"
-                  stroke={pinColor(w.category)}
+                  stroke={pinColor(w)}
                   strokeWidth={w.category === "exec" ? 2.5 : 1.75}
                   strokeOpacity={0.9}
                 />

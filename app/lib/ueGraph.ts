@@ -17,6 +17,12 @@ export interface UePin {
   direction: PinDirection;
   /** PinType.PinCategory: exec, bool, real, int, struct, object, delegate, name, string… */
   category: string;
+  /**
+   * The struct/enum leaf from PinSubCategoryObject (e.g. "Vector", "Rotator",
+   * "Transform"), used to colour struct pins that UE tints specially. "" when
+   * the pin has no sub-type object.
+   */
+  subType: string;
   hidden: boolean;
   /**
    * Targets this pin links to. Unreal reuses pin IDs across nodes (they are only
@@ -37,6 +43,8 @@ export interface UeNode {
   title: string;
   inputs: UePin[];
   outputs: UePin[];
+  /** Broad classification used for the header colour and pill rendering. */
+  role: UeRole;
   /**
    * The node's exact source slice, "Begin Object … End Object" verbatim. Kept so
    * a selection of nodes can be copied back into Unreal unchanged.
@@ -44,13 +52,25 @@ export interface UeNode {
   raw: string;
 }
 
+export type UeRole =
+  | "event"
+  | "pure"
+  | "function"
+  | "macro"
+  | "variable-get"
+  | "variable-set"
+  | "flow"
+  | "material"
+  | "other";
+
 export interface UeWire {
   fromNode: string;
   fromPin: string;
   toNode: string;
   toPin: string;
-  /** Category of the source (output) pin — drives the wire colour. */
+  /** Category + sub-type of the source (output) pin — drive the wire colour. */
   category: string;
+  subType: string;
 }
 
 export interface UeGraph {
@@ -222,6 +242,45 @@ function nodeTitle(classLeaf: string, headerLines: string[], innerLines: string[
   return humanise(classLeaf.replace(/^K2Node_/, ""));
 }
 
+/** Classifies a node for header colour and pill rendering. */
+function nodeRole(classLeaf: string, headerLines: string[]): UeRole {
+  const header = headerLines.join("\n");
+  const isPure = /(^|\n)\s*bIsPureFunc=True\b/.test(header);
+  switch (classLeaf) {
+    case "K2Node_Event":
+    case "K2Node_CustomEvent":
+    case "K2Node_ComponentBoundEvent":
+    case "K2Node_ActorBoundEvent":
+    case "K2Node_InputAction":
+    case "K2Node_InputKey":
+      return "event";
+    case "K2Node_VariableGet":
+      return "variable-get";
+    case "K2Node_VariableSet":
+      return "variable-set";
+    case "K2Node_MacroInstance":
+    case "K2Node_ForEachElementInEnumArray":
+      return "macro";
+    case "K2Node_IfThenElse":
+    case "K2Node_ExecutionSequence":
+    case "K2Node_MultiGate":
+    case "K2Node_Select":
+    case "K2Node_SwitchEnum":
+    case "K2Node_SwitchInt":
+    case "K2Node_SwitchString":
+      return "flow";
+    case "K2Node_CallFunction":
+    case "K2Node_CommutativeAssociativeBinaryOperator":
+    case "K2Node_PromotableOperator":
+      return isPure ? "pure" : "function";
+    default:
+      if (classLeaf.startsWith("MaterialGraphNode") || classLeaf.startsWith("MaterialExpression")) {
+        return "material";
+      }
+      return isPure ? "pure" : "other";
+  }
+}
+
 /** Parses one `CustomProperties Pin (…)` line. */
 function parsePin(line: string): UePin | null {
   const open = line.indexOf("(");
@@ -233,6 +292,7 @@ function parsePin(line: string): UePin | null {
   let label = "";
   let direction: PinDirection = "input";
   let category = "";
+  let subType = "";
   let hidden = false;
   const links: { node: string; pin: string }[] = [];
 
@@ -262,6 +322,15 @@ function parsePin(line: string): UePin | null {
       case "PinType.PinCategory":
         category = unquote(value);
         break;
+      case "PinType.PinSubCategoryObject": {
+        // e.g. "/Script/CoreUObject.ScriptStruct'/Script/CoreUObject.Vector'" -> "Vector"
+        const raw = unquote(value);
+        if (raw && raw !== "None") {
+          const m = /([A-Za-z0-9_]+)'?\s*$/.exec(raw.replace(/'$/, ""));
+          subType = m ? m[1] : "";
+        }
+        break;
+      }
       case "bHidden":
         hidden = value.toLowerCase() === "true";
         break;
@@ -286,7 +355,7 @@ function parsePin(line: string): UePin | null {
   if (!id) {
     return null;
   }
-  return { id, name, label: label || name, direction, category, hidden, links };
+  return { id, name, label: label || name, direction, category, subType, hidden, links };
 }
 
 const CLASS_RE = /^Begin Object Class=(\S+)\s+Name="([^"]+)"/;
@@ -395,6 +464,7 @@ export function parseUeGraph(text: string): UeGraph {
       posX,
       posY,
       title: nodeTitle(effLeaf, headerLines, innerLines),
+      role: nodeRole(effLeaf, headerLines),
       inputs: pins.filter((p) => p.direction === "input" && !p.hidden),
       outputs: pins.filter((p) => p.direction === "output" && !p.hidden),
       raw: rawLines.join("\n"),
@@ -434,6 +504,7 @@ export function parseUeGraph(text: string): UeGraph {
           toNode: inp.node,
           toPin: inp.pin.id,
           category: out.pin.category,
+          subType: out.pin.subType,
         });
       }
     }
