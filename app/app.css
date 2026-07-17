@@ -1148,22 +1148,23 @@
   to { opacity: 1; }
 }
 .wk-lightbox-stage {
+  position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   cursor: grab;
   touch-action: none;
 }
 .wk-lightbox-stage:active {
   cursor: grabbing;
 }
+/* Placed at the stage's top-left and driven purely by the transform, so the
+   cursor-anchored zoom maths (transform-origin 0 0) stays consistent. */
 .wk-lightbox-img {
-  max-width: 92vw;
-  max-height: 92vh;
-  transform-origin: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
   will-change: transform;
   user-select: none;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);

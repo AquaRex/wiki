@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /*
  * A single, app-wide image lightbox. Any image opens it via openLightbox(); the
@@ -21,22 +21,33 @@ export function openLightbox(src: string, alt: string) {
 }
 
 function closeLightbox() {
+  if (!current) {
+    return; // idempotent — a second close (e.g. bubbled event) is a no-op
+  }
   current = null;
   listeners.forEach((l) => l());
 }
 
+/*
+ * The image is absolutely placed at the stage's top-left with transform-origin
+ * 0 0, so a translate+scale is a plain affine map from image space to stage
+ * pixels. That keeps the cursor-anchored zoom maths simple and correct — the
+ * point under the cursor stays put because we solve for the translate that keeps
+ * (cursorImagePoint) fixed on screen.
+ */
 interface View {
   scale: number;
   x: number;
   y: number;
 }
 
-const FIT: View = { scale: 1, x: 0, y: 0 };
-
 export function Lightbox() {
   const [state, setState] = useState<LightboxState | null>(current);
-  const [view, setView] = useState<View>(FIT);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<View>({ scale: 1, x: 0, y: 0 });
+  const stageRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const pan = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
 
   // Subscribe to the external store.
@@ -48,16 +59,32 @@ export function Lightbox() {
     };
   }, []);
 
-  // Reset zoom/pan each time a new image opens, and lock body scroll while open.
-  useEffect(() => {
-    if (state) {
-      setView(FIT);
-      const prev = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = prev;
-      };
+  // Centre the image in the stage at its natural (max) size — the initial fit.
+  const fit = useCallback(() => {
+    const stage = stageRef.current;
+    const img = imgRef.current;
+    if (!stage || !img || !img.naturalWidth) {
+      return;
     }
+    const sw = stage.clientWidth;
+    const sh = stage.clientHeight;
+    // Fit the natural image inside the stage with a small margin, never upscaling.
+    const scale = Math.min(1, (sw * 0.94) / img.naturalWidth, (sh * 0.94) / img.naturalHeight);
+    const w = img.naturalWidth * scale;
+    const h = img.naturalHeight * scale;
+    setView({ scale, x: (sw - w) / 2, y: (sh - h) / 2 });
+  }, []);
+
+  // Lock body scroll while open; reset when the image changes.
+  useEffect(() => {
+    if (!state) {
+      return;
+    }
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [state]);
 
   // Esc closes.
@@ -76,29 +103,35 @@ export function Lightbox() {
 
   // Non-passive wheel so zooming doesn't scroll the page behind the overlay.
   useEffect(() => {
-    const el = wrapRef.current;
-    if (!el || !state) {
+    const stage = stageRef.current;
+    if (!stage || !state) {
       return;
     }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const rect = el.getBoundingClientRect();
+      const rect = stage.getBoundingClientRect();
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
-      setView((v) => {
-        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        const next = Math.min(8, Math.max(1, v.scale * factor));
-        // Keep the point under the cursor fixed while zooming.
-        return {
-          scale: next,
-          x: px - ((px - v.x) / v.scale) * next,
-          y: py - ((py - v.y) / v.scale) * next,
-        };
+      const v = viewRef.current;
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const next = Math.min(8, Math.max(0.2, v.scale * factor));
+      // The image point currently under the cursor must stay under the cursor.
+      setView({
+        scale: next,
+        x: px - ((px - v.x) / v.scale) * next,
+        y: py - ((py - v.y) / v.scale) * next,
       });
     };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    stage.addEventListener("wheel", onWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", onWheel);
   }, [state]);
+
+  // Fit once the image (and stage) are laid out.
+  useLayoutEffect(() => {
+    if (state && imgRef.current?.complete) {
+      fit();
+    }
+  }, [state, fit]);
 
   if (!state) {
     return null;
@@ -108,12 +141,17 @@ export function Lightbox() {
     if (e.button !== 0) {
       return;
     }
-    pan.current = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    pan.current = { sx: e.clientX, sy: e.clientY, vx: viewRef.current.x, vy: viewRef.current.y };
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* pointer already gone — ignore */
+    }
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    if (pan.current) {
-      setView((v) => ({ ...v, x: pan.current!.vx + (e.clientX - pan.current!.sx), y: pan.current!.vy + (e.clientY - pan.current!.sy) }));
+    const p = pan.current;
+    if (p) {
+      setView((v) => ({ ...v, x: p.vx + (e.clientX - p.sx), y: p.vy + (e.clientY - p.sy) }));
     }
   };
   const onPointerUp = () => {
@@ -123,29 +161,40 @@ export function Lightbox() {
   return (
     <div
       className="wk-lightbox"
-      onClick={(e) => {
-        // Click the backdrop (not the image) to close.
+      onPointerDown={(e) => {
+        // Press on the empty backdrop (not the image) closes.
         if (e.target === e.currentTarget) {
           closeLightbox();
         }
       }}
     >
-      <button type="button" className="wk-lightbox-close" onClick={closeLightbox} aria-label="Close">
+      <button
+        type="button"
+        className="wk-lightbox-close"
+        onClick={(e) => {
+          e.stopPropagation();
+          closeLightbox();
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        aria-label="Close"
+      >
         ✕
       </button>
       <div
-        ref={wrapRef}
+        ref={stageRef}
         className="wk-lightbox-stage"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onDoubleClick={() => setView(FIT)}
+        onDoubleClick={fit}
       >
         <img
+          ref={imgRef}
           className="wk-lightbox-img"
           src={state.src}
           alt={state.alt}
           draggable={false}
+          onLoad={fit}
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
         />
       </div>
