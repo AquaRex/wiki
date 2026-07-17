@@ -346,7 +346,13 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
  * the item's name below it, then the password field. On success the unlocked
  * page replaces the blank one and the caller re-renders it.
  */
-function AccessPrompt({ page, onUnlocked }: { page: WikiPage; onUnlocked: (unlocked: WikiPage) => void }) {
+function AccessPrompt({
+  page,
+  onUnlocked,
+}: {
+  page: WikiPage;
+  onUnlocked: (unlocked: WikiPage, password: string) => void;
+}) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -359,7 +365,7 @@ function AccessPrompt({ page, onUnlocked }: { page: WikiPage; onUnlocked: (unloc
     setError("");
     try {
       const unlocked = await getStore().unlockPage(page.path, password);
-      onUnlocked(unlocked);
+      onUnlocked(unlocked, password);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Wrong password.");
       setBusy(false);
@@ -547,6 +553,14 @@ function PageHeader({
 /* Page view                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Passwords entered this session that unlocked a project's lock, kept in memory
+ * (not storage) so any page inheriting the project lock opens without a second
+ * prompt — and a refresh clears them, re-prompting as intended. Keyed by lower-
+ * cased project slug.
+ */
+const unlockedProjects = new Map<string, string>();
+
 export default function WikiPage({ loaderData }: Route.ComponentProps) {
   const { editUnlocked } = useAuth();
   const location = useLocation();
@@ -555,6 +569,9 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
   // A locked page unlocked this session — keyed by path so navigating away and
   // back keeps it open without re-entering the password.
   const [unlocked, setUnlocked] = useState<Record<string, WikiPage>>({});
+  // Set when the current locked page couldn't be opened with the project's
+  // remembered password (it has its own), so we must show the prompt.
+  const [autoTried, setAutoTried] = useState<string | null>(null);
 
   useEffect(() => {
     if (location.hash) {
@@ -567,6 +584,44 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
       }
     }
   }, [location.hash, location.key]);
+
+  // When a locked page loads and its project was already unlocked this session,
+  // open it with the remembered project password — no second prompt. If that
+  // password doesn't fit (the page has its own), fall through to the prompt.
+  const lp = loaderData.landing ? null : loaderData.page;
+  const lproject = loaderData.landing ? "" : (loaderData.project ?? "");
+  useEffect(() => {
+    if (!lp || !lp.locked) {
+      return;
+    }
+    const key = lp.path.toLowerCase();
+    if (unlocked[key]) {
+      return;
+    }
+    const projectPw = unlockedProjects.get(lproject.toLowerCase());
+    if (!projectPw) {
+      return;
+    }
+    let cancelled = false;
+    store
+      .unlockPage(lp.path, projectPw)
+      .then((u) => {
+        if (!cancelled) {
+          setUnlocked((prev) => ({ ...prev, [u.path.toLowerCase()]: u }));
+        }
+      })
+      .catch(() => {
+        // The project password doesn't open this page — it has its own. Show the
+        // prompt (autoTried marks that we already tried, so we don't loop).
+        if (!cancelled) {
+          setAutoTried(key);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lp?.path, lp?.locked, lproject]);
 
   // Built once per page rather than inline: a fresh ctx on every render would
   // remount every image in the preview while typing.
@@ -594,8 +649,15 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
   const currentPath = page?.path ?? requestedPath;
   // A page whose body the server withheld behind a password (access = locked).
   // Hidden items are already filtered out by the database, so there is no client
-  // gate for them — they simply don't load.
-  const needsPassword = Boolean(page?.locked);
+  // gate for them — they simply don't load. While an auto-unlock (from a
+  // remembered project password) is still pending, don't flash the prompt.
+  const pageKey = page?.path.toLowerCase() ?? "";
+  const autoPending =
+    Boolean(page?.locked) &&
+    unlockedProjects.has(project.toLowerCase()) &&
+    autoTried !== pageKey &&
+    !unlocked[pageKey];
+  const needsPassword = Boolean(page?.locked) && !autoPending;
 
   const deletePage = async (target: WikiPage) => {
     if (confirm(`Delete the page "${target.title}" permanently?`)) {
@@ -608,10 +670,19 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
     <Shell pages={projectPages} project={project} currentPath={currentPath}>
       {!page ? (
         <NotFound requestedPath={requestedPath} />
+      ) : autoPending ? (
+        <div className="flex min-h-[70vh] items-center justify-center">
+          <div className="eyebrow">Unlocking…</div>
+        </div>
       ) : needsPassword ? (
         <AccessPrompt
           page={page}
-          onUnlocked={(u) => setUnlocked((prev) => ({ ...prev, [u.path.toLowerCase()]: u }))}
+          onUnlocked={(u, pw) => {
+            setUnlocked((prev) => ({ ...prev, [u.path.toLowerCase()]: u }));
+            // Remember this password for the project so sibling pages that share
+            // the project lock open without another prompt this session.
+            unlockedProjects.set(project.toLowerCase(), pw);
+          }}
         />
       ) : (
         <>
