@@ -40,20 +40,50 @@ import { Button } from "~/components/ui/button";
 import { renderMarkdown, countH2, type RenderContext } from "~/lib/markdown";
 import { newBlockId, type WikiBlock, type WikiPage } from "~/lib/shared";
 import { getStore } from "~/lib/store";
-import { parseUeGraph } from "~/lib/ueGraph";
+
+type Segment =
+  | { kind: "text"; text: string }
+  | { kind: "bp"; type: "blueprint" | "material"; inner: string };
 
 /**
- * A block that is nothing but a single :::blueprint / :::material directive is
- * edited with a compact card instead of the giant textarea — its pasted text is
- * thousands of characters and would otherwise make the block impossible to edit.
- * Returns the directive type and the raw inner text, or null for ordinary blocks.
+ * Splits a block's text into prose and blueprint/material segments. A pasted
+ * graph is thousands of characters; in the editor its segment collapses to a
+ * one-line box while the prose around it stays a normal editable field. Ordinary
+ * blocks come back as a single text segment. Reassembled by joinSegments.
  */
-function blueprintBlock(text: string): { type: "blueprint" | "material"; inner: string } | null {
-  const m = /^\s*:::(blueprint|material)\b[^\n]*\n([\s\S]*?)\n:::\s*$/.exec(text);
-  if (!m) {
-    return null;
+const BP_REGION = /^[ \t]*:::(blueprint|material)\b[^\n]*\n([\s\S]*?)\n[ \t]*:::[ \t]*$/gm;
+
+function splitBlueprintSegments(text: string): Segment[] {
+  const segments: Segment[] = [];
+  let last = 0;
+  BP_REGION.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = BP_REGION.exec(text)) !== null) {
+    if (m.index > last) {
+      segments.push({ kind: "text", text: text.slice(last, m.index) });
+    }
+    segments.push({ kind: "bp", type: m[1] as "blueprint" | "material", inner: m[2] });
+    last = m.index + m[0].length;
   }
-  return { type: m[1] as "blueprint" | "material", inner: m[2] };
+  if (last < text.length) {
+    segments.push({ kind: "text", text: text.slice(last) });
+  }
+  if (segments.length === 0) {
+    segments.push({ kind: "text", text: "" });
+  }
+  return segments;
+}
+
+function joinSegments(segments: Segment[]): string {
+  return segments
+    .map((s) => (s.kind === "text" ? s.text : `:::${s.type}\n${s.inner}\n:::`))
+    .join("");
+}
+
+/** True when the block contains at least one blueprint/material region. */
+function hasBlueprint(text: string): boolean {
+  BP_REGION.lastIndex = 0;
+  return BP_REGION.test(text);
 }
 
 interface Snippet {
@@ -167,27 +197,28 @@ function useMutatePage(pagePath: string) {
 }
 
 /**
- * The one-line editor for a blueprint/material block: node/link counts, plus
- * Copy (the raw text back out) and Paste (replace the graph from the clipboard).
- * The full T3D never appears in a scrollable field.
+ * The collapsed one-line box that stands in for a blueprint/material region in
+ * the editor: a truncated preview of the graph text with Copy / Paste / Delete.
+ * The full T3D lives in the block but is never shown at length.
  */
-function BlueprintCard({
+function BlueprintBox({
   type,
   inner,
   onReplace,
+  onDelete,
 }: {
   type: "blueprint" | "material";
   inner: string;
   onReplace: (inner: string) => void;
+  onDelete: () => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const stats = useMemo(() => {
-    try {
-      const g = parseUeGraph(inner);
-      return { nodes: g.nodes.length, links: g.wires.length };
-    } catch {
-      return { nodes: 0, links: 0 };
-    }
+
+  // First non-empty line, trimmed to a short teaser — enough to recognise it.
+  const teaser = useMemo(() => {
+    const firstLine = inner.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+    const short = firstLine.length > 52 ? firstLine.slice(0, 52) + "…" : firstLine;
+    return short || "empty";
   }, [inner]);
 
   const copy = async () => {
@@ -212,30 +243,115 @@ function BlueprintCard({
   };
 
   return (
-    <div className="flex items-center gap-2 border-b border-border bg-surface-2 px-3 py-2">
-      <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-waccent">
+    <div className="mx-5 my-2 flex items-center gap-2 rounded-md border border-border bg-code-bg px-3 py-2">
+      <span className="font-mono text-[10.5px] font-semibold uppercase tracking-wider text-waccent">
         {type}
       </span>
-      <span className="font-mono text-[11px] text-text-faint">
-        {stats.nodes} nodes · {stats.links} links · text hidden
+      <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-text-faint" title="Graph text (hidden)">
+        [ {teaser} ]
       </span>
-      <div className="ml-auto flex gap-1.5">
+      <div className="flex shrink-0 gap-1">
         <button
           type="button"
           onClick={copy}
-          className="flex items-center gap-1 rounded border border-border px-2 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-dim hover:bg-surface hover:text-foreground"
+          title="Copy the graph text"
+          className="flex items-center gap-1 rounded border border-border px-1.5 py-1 font-mono text-[10px] uppercase tracking-wide text-text-dim hover:bg-surface hover:text-foreground"
         >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? "Copied" : "Copy text"}
+          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+          {copied ? "Copied" : "Copy"}
         </button>
         <button
           type="button"
           onClick={pasteNew}
-          className="flex items-center gap-1 rounded border border-border px-2 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-dim hover:bg-surface hover:text-foreground"
+          title="Replace with nodes from the clipboard"
+          className="flex items-center gap-1 rounded border border-border px-1.5 py-1 font-mono text-[10px] uppercase tracking-wide text-text-dim hover:bg-surface hover:text-foreground"
         >
-          <Clipboard className="size-3.5" /> Paste new
+          <Clipboard className="size-3" /> Paste
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          title="Remove this graph"
+          className="flex items-center rounded border border-transparent px-1.5 py-1 text-text-faint hover:border-border hover:text-crit"
+        >
+          <Trash2 className="size-3" />
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Edits a block that mixes prose and blueprint/material regions. Prose segments
+ * render as auto-growing textareas; each graph region collapses to a BlueprintBox
+ * so its huge text never fills the editor. Any edit reassembles the whole draft.
+ */
+function SegmentedEditor({
+  draft,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  draft: string;
+  onChange: (text: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const segments = useMemo(() => splitBlueprintSegments(draft), [draft]);
+
+  const replaceSegment = (index: number, next: Segment | null) => {
+    const nextSegments = segments.slice();
+    if (next === null) {
+      nextSegments.splice(index, 1);
+    } else {
+      nextSegments[index] = next;
+    }
+    onChange(joinSegments(nextSegments));
+  };
+
+  const grow = (el: HTMLTextAreaElement | null) => {
+    if (el) {
+      el.style.height = "0px";
+      el.style.height = el.scrollHeight + 2 + "px";
+    }
+  };
+
+  return (
+    <div className="bg-code-bg py-2">
+      {segments.map((seg, i) =>
+        seg.kind === "bp" ? (
+          <BlueprintBox
+            key={i}
+            type={seg.type}
+            inner={seg.inner}
+            onReplace={(inner) => replaceSegment(i, { kind: "bp", type: seg.type, inner })}
+            onDelete={() => replaceSegment(i, null)}
+          />
+        ) : (
+          <textarea
+            key={i}
+            ref={grow}
+            value={seg.text}
+            onChange={(e) => {
+              replaceSegment(i, { kind: "text", text: e.target.value });
+              grow(e.target);
+            }}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                onSave();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onCancel();
+              }
+            }}
+            spellCheck={false}
+            placeholder="Text…"
+            className="editor-textarea block w-full resize-none bg-transparent px-5 py-1 text-foreground outline-none"
+          />
+        )
+      )}
     </div>
   );
 }
@@ -408,24 +524,19 @@ function BlockEditorPanel({
     }
   };
 
-  // A blueprint/material block is edited through a compact card, never the huge
-  // textarea — the graph text just needs to live somewhere, not be read.
-  const bp = blueprintBlock(draft);
-  if (bp) {
+  // When the block carries a blueprint/material region, edit it as segments: the
+  // graph text collapses to a one-line box while prose around it stays editable.
+  if (hasBlueprint(draft)) {
     return (
       <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
         <div className="wiki border-b border-border px-5 pb-4 pt-1">
           {renderMarkdown(draft, ctx, h2Start)}
           <div className="clear-both" />
         </div>
-        <BlueprintCard
-          type={bp.type}
-          inner={bp.inner}
-          onReplace={(nextInner) => setDraft(`:::${bp.type}\n${nextInner}\n:::`)}
-        />
+        <SegmentedEditor draft={draft} onChange={setDraft} onSave={save} onCancel={onClose} />
         <div className="flex items-center justify-between border-t border-border px-3 py-2">
           <span className="font-mono text-[10.5px] uppercase tracking-wider text-text-faint">
-            Graph preview above · the pasted text is kept, not shown · Ctrl+Enter to save
+            Graph text is collapsed · Ctrl+Enter to save · Esc to cancel
           </span>
           <div className="flex gap-2">
             <Button variant="ghost" size="xs" onClick={onClose} disabled={busy}>

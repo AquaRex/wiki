@@ -336,14 +336,15 @@ function NodeBox({
         cursor: "move",
       }}
     >
-      {/* The type colour is a short accent line across the top, ~85% width, with
-          the title sitting on the node background directly below it. */}
+      {/* The type colour is a short accent line across the top, centred at ~85%
+          width, with the title on the node background directly below it. */}
       <div
         style={{
           height: HEADER_H,
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
+          alignItems: "center",
           padding: "0 10px",
           whiteSpace: "nowrap",
         }}
@@ -351,13 +352,15 @@ function NodeBox({
         <div
           style={{
             width: "85%",
-            height: 3,
-            borderRadius: 2,
+            height: 4.5,
+            borderRadius: 3,
             background: headerColor(p.node),
             marginBottom: 4,
           }}
         />
-        <div style={{ color: "#fff", fontSize: 12.5, fontWeight: 600 }}>{p.node.title}</div>
+        <div style={{ color: "#fff", fontSize: 12.5, fontWeight: 600, alignSelf: "flex-start" }}>
+          {p.node.title}
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", padding: `${PINS_TOP}px 0` }}>
         <div>
