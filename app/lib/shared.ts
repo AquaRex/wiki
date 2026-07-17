@@ -32,6 +32,8 @@ export interface WikiPage {
 export interface PageSummary {
   path: string;
   title: string;
+  /** The page's own access level, for showing the right icon in the index. */
+  access: AccessLevel;
 }
 
 export interface VariableDef {

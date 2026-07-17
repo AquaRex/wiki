@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useRevalidator } from "react-router";
-import { FolderOpen, GripVertical, Lock, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock } from "lucide-react";
+import { EyeOff, FolderOpen, GripVertical, Lock, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { Route } from "./+types/wiki";
 import {
-  isPathLocked,
-  isProjectPrivate,
   normalizePath,
   pathInProject,
   projectDisplayName,
   projectOf,
+  type AccessLevel,
   type PageSummary,
   type RootMeta,
   type VariableDef,
@@ -23,6 +22,7 @@ import { wikiConfig } from "~/wiki.config";
 import { Shell } from "~/components/wiki/shell";
 import { BlockList } from "~/components/wiki/block-editor";
 import { EditableText } from "~/components/wiki/editable";
+import { AccessControl } from "~/components/wiki/access-control";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 
@@ -31,6 +31,7 @@ interface ProjectCard {
   title: string;
   lede: string;
   pageCount: number;
+  access: AccessLevel;
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -48,6 +49,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 
   if (!splat) {
     const slugs = [...new Set(allPages.map((p) => projectOf(p.path)))];
+    const projectAccess = await store.getProjectAccess();
     const projects: ProjectCard[] = await Promise.all(
       slugs.map(async (slug) => {
         const home = await store.getPage(`${slug}/Home`);
@@ -56,6 +58,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
           title: home?.title || projectDisplayName(slug),
           lede: home?.lede ?? "",
           pageCount: allPages.filter((p) => pathInProject(p.path, slug)).length,
+          access: projectAccess[slug.toLowerCase()] ?? "public",
         };
       })
     );
@@ -153,18 +156,6 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
     persist({ ...meta, order }, "Could not reorder the projects.");
   };
 
-  const toggleLock = (project: string, locked: boolean) => {
-    persist(
-      {
-        ...meta,
-        private: locked
-          ? [...meta.private, project]
-          : meta.private.filter((s) => s.toLowerCase() !== project.toLowerCase()),
-      },
-      "Could not change the lock."
-    );
-  };
-
   return (
     <div className="min-h-screen">
       <header className="page-hero">
@@ -198,7 +189,7 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
       <main className="mx-auto max-w-[1240px] px-6 py-12">
         <div className={`grid gap-5 sm:grid-cols-2 lg:grid-cols-3 ${busy ? "pointer-events-none opacity-60" : ""}`}>
           {ordered.map((project) => {
-            const locked = isProjectPrivate(meta, project.slug);
+            const locked = project.access !== "public";
             const marker = over?.slug === project.slug ? over.after : null;
             return (
               <div
@@ -243,7 +234,8 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
                   <div className="flex items-center gap-2 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-text-faint">
                     <FolderOpen className="size-3.5" />
                     /{project.slug}
-                    {locked && <Lock className="size-3 text-waccent" />}
+                    {project.access === "locked" && <Lock className="size-3 text-waccent" />}
+                    {project.access === "hidden" && <EyeOff className="size-3 text-waccent" />}
                   </div>
                   <div className="mt-3 font-heading text-[20px] font-bold tracking-tight group-hover:text-waccent">
                     {project.title}
@@ -256,16 +248,13 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
                   </div>
                 </Link>
                 {editUnlocked && (
-                  <div className="absolute right-3 top-3 flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => toggleLock(project.slug, !locked)}
-                      title={locked ? "Make public" : "Lock behind the edit password"}
-                      aria-label={locked ? "Make public" : "Make private"}
-                      className="flex size-6 items-center justify-center rounded text-text-faint hover:text-waccent"
-                    >
-                      {locked ? <Lock className="size-3.5 text-waccent" /> : <Unlock className="size-3.5" />}
-                    </button>
+                  <div className="absolute right-3 top-3 flex items-center gap-1.5">
+                    <AccessControl
+                      scope="project"
+                      itemKey={project.slug}
+                      name={project.title}
+                      current={project.access}
+                    />
                     <GripVertical className="size-3.5 cursor-grab text-text-faint" />
                   </div>
                 )}
@@ -325,32 +314,6 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
 /* ------------------------------------------------------------------ */
 /* Lock / NotFound                                                      */
 /* ------------------------------------------------------------------ */
-
-/**
- * Shown when a private page or project isn't visible to this viewer. The
- * content is already withheld by row level security — this only explains why.
- */
-function LockScreen({ requestedPath, what }: { requestedPath: string; what: string }) {
-  return (
-    <div className="flex min-h-[70vh] items-center justify-center px-6">
-      <div className="w-full max-w-sm rounded-xl border border-border-strong bg-surface p-8 shadow-lg">
-        <div className="eyebrow mb-4 !text-[11px]">Restricted</div>
-        <div className="mb-1 flex items-center gap-2 font-heading text-xl font-bold">
-          <Lock className="size-4 text-waccent" /> Private {what}
-        </div>
-        <p className="mb-6 text-sm text-text-dim">
-          <span className="font-mono text-[12px]">/{requestedPath}</span> is private. Sign in to view it.
-        </p>
-        <Button
-          className="w-full"
-          render={<Link to={`/admin?to=${encodeURIComponent(`/${requestedPath}`)}`} />}
-        >
-          Sign in
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 /**
  * The password prompt for a locked (visible-but-gated) page. Styled like the
@@ -560,12 +523,10 @@ function PageHeader({
 /* ------------------------------------------------------------------ */
 
 export default function WikiPage({ loaderData }: Route.ComponentProps) {
-  const { editUnlocked, privateUnlocked } = useAuth();
+  const { editUnlocked } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const store = getStore();
-  const meta = useProjectMeta(loaderData.landing ? "" : (loaderData.project ?? ""));
-  const [rootMeta] = useRootMeta();
   // A locked page unlocked this session — keyed by path so navigating away and
   // back keeps it open without re-entering the password.
   const [unlocked, setUnlocked] = useState<Record<string, WikiPage>>({});
@@ -606,9 +567,9 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
   const variables = loaderData.variables!;
   const projectPages = allPages.filter((p) => pathInProject(p.path, project));
   const currentPath = page?.path ?? requestedPath;
-  const lockedProject = isProjectPrivate(rootMeta, project);
-  const locked = (lockedProject || isPathLocked(meta, currentPath)) && !privateUnlocked;
   // A page whose body the server withheld behind a password (access = locked).
+  // Hidden items are already filtered out by the database, so there is no client
+  // gate for them — they simply don't load.
   const needsPassword = Boolean(page?.locked);
 
   const deletePage = async (target: WikiPage) => {
@@ -620,9 +581,7 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
 
   return (
     <Shell pages={projectPages} project={project} currentPath={currentPath}>
-      {locked ? (
-        <LockScreen requestedPath={requestedPath} what={lockedProject ? "project" : "page"} />
-      ) : !page ? (
+      {!page ? (
         <NotFound requestedPath={requestedPath} />
       ) : needsPassword ? (
         <AccessPrompt
@@ -643,15 +602,23 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
                   placeholder="Category · Subcategory"
                 />
                 {editUnlocked && (
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    title="Delete page"
-                    className="text-text-faint hover:text-crit"
-                    onClick={() => deletePage(page)}
-                  >
-                    <Trash2 />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <AccessControl
+                      scope="page"
+                      itemKey={page.path}
+                      name={page.title}
+                      current={page.access}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      title="Delete page"
+                      className="text-text-faint hover:text-crit"
+                      onClick={() => deletePage(page)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
                 )}
               </div>
               {/* The page name — drives the URL, sidebar and index. Only surfaced

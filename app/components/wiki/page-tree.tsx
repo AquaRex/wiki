@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRevalidator } from "react-router";
-import { ChevronRight, FileText, FolderClosed, FolderOpen, GripVertical, Lock, Pencil, Trash2, Unlock } from "lucide-react";
+import { ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, GripVertical, Lock, Pencil, Trash2 } from "lucide-react";
 import { getStore } from "~/lib/store";
 import {
   lastSegment,
@@ -98,16 +98,12 @@ function TreeItem({
   depth,
   currentPath,
   draggable,
-  ownsLock,
-  lockedAbove,
-  canView,
   drag,
   over,
   onDragStart,
   onDragEnd,
   onDragOver,
   onDrop,
-  onToggleLock,
   onDeleteFolder,
   onContextMenu,
 }: {
@@ -115,30 +111,23 @@ function TreeItem({
   depth: number;
   currentPath: string;
   draggable: boolean;
-  /** Whether a rel is itself an entry in the private list, i.e. owns a lock. */
-  ownsLock: (rel: string) => boolean;
-  /** A folder above this node is locked, so this node inherits it. */
-  lockedAbove: boolean;
-  canView: boolean;
   drag: DragState | null;
   over: OverState | null;
   onDragStart: (node: TreeNode) => void;
   onDragEnd: () => void;
   onDragOver: (node: TreeNode, e: React.DragEvent) => void;
   onDrop: (node: TreeNode, e: React.DragEvent) => void;
-  onToggleLock: (node: TreeNode, locked: boolean) => void;
   onDeleteFolder: (node: TreeNode) => void;
   onContextMenu: (node: TreeNode, e: React.MouseEvent) => void;
 }) {
   const isActive = node.page && node.page.path.toLowerCase() === currentPath.toLowerCase();
   const isAncestor = currentPath.toLowerCase().startsWith(node.fullPath.toLowerCase() + "/");
   const [open, setOpen] = useState(depth === 0 || isAncestor);
-  const lockedHere = ownsLock(node.rel);
   const isHome = node.rel === HOME;
   const canDrag = draggable && !isHome;
-  // A locked subtree stays collapsed for readers — the lock itself is not a secret.
-  const hideChildren = (lockedHere || lockedAbove) && !canView;
-  const hasChildren = node.children.length > 0 && !hideChildren;
+  // Visibility is enforced by the database now: hidden items simply aren't in the
+  // tree, so nothing is collapsed client-side for privacy.
+  const hasChildren = node.children.length > 0;
   const isFolder = isFolderNode(node);
 
   const isDragging = drag?.rel === node.rel;
@@ -153,6 +142,9 @@ function TreeItem({
           ? "ring-1 ring-accent-line bg-accent-soft"
           : "";
 
+  // The icon reflects the page's REAL access: a lock only for a password-locked
+  // page, an eye-off for a hidden one. The old meta "lock" no longer shows here.
+  const access = node.page?.access ?? "public";
   const label = (
     <span className="flex min-w-0 items-center gap-1.5">
       {isFolder ? (
@@ -165,12 +157,13 @@ function TreeItem({
         <FileText className="size-3.5 shrink-0 text-text-faint" />
       )}
       <span className="truncate">{node.page ? node.page.title : node.name}</span>
-      {lockedHere && <Lock className="size-3 shrink-0 text-waccent" />}
+      {access === "locked" && <Lock className="size-3 shrink-0 text-waccent" />}
+      {access === "hidden" && <EyeOff className="size-3 shrink-0 text-waccent" />}
     </span>
   );
 
   // A folder with no page of its own only toggles open; there is nothing to link to.
-  const linkable = node.page && !(lockedHere && !canView && isFolder);
+  const linkable = Boolean(node.page);
 
   return (
     <div>
@@ -214,19 +207,7 @@ function TreeItem({
             {label}
           </button>
         )}
-        {draggable && !isHome && !lockedAbove && (
-          <button
-            type="button"
-            onClick={() => onToggleLock(node, !lockedHere)}
-            title={lockedHere ? "Make public" : "Lock behind the edit password"}
-            aria-label={lockedHere ? "Make public" : "Make private"}
-            className={`mr-1 flex size-5 shrink-0 items-center justify-center rounded text-text-faint hover:text-waccent ${
-              lockedHere ? "opacity-100 text-waccent" : "opacity-0 group-hover:opacity-100"
-            }`}
-          >
-            {lockedHere ? <Lock className="size-3" /> : <Unlock className="size-3" />}
-          </button>
-        )}
+        {/* Access is set from a page's own header or a project card, not here. */}
         {/* Folders only — a page is deleted from its own header. */}
         {draggable && !isHome && !node.page && isFolder && (
           <button
@@ -252,16 +233,12 @@ function TreeItem({
               depth={depth + 1}
               currentPath={currentPath}
               draggable={draggable}
-              ownsLock={ownsLock}
-              lockedAbove={lockedHere || lockedAbove}
-              canView={canView}
               drag={drag}
               over={over}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onDragOver={onDragOver}
               onDrop={onDrop}
-              onToggleLock={onToggleLock}
               onDeleteFolder={onDeleteFolder}
               onContextMenu={onContextMenu}
             />
@@ -277,14 +254,12 @@ export function PageTree({
   project,
   currentPath,
   editUnlocked,
-  privateUnlocked,
   meta,
 }: {
   pages: PageSummary[];
   project: string;
   currentPath: string;
   editUnlocked: boolean;
-  privateUnlocked: boolean;
   meta: ProjectMeta;
 }) {
   const [local, setLocal] = useState<ProjectMeta>(meta);
@@ -302,8 +277,6 @@ export function PageTree({
   const { tree, byRel } = useMemo(() => buildTree(pages, project, local), [pages, project, local]);
 
   const childrenOf = (rel: string) => (rel === "" ? tree : (byRel.get(rel)?.children ?? []));
-
-  const ownsLock = (rel: string) => local.private.some((locked) => locked.toLowerCase() === rel.toLowerCase());
 
   // A folder can't be dropped into itself or its own subtree.
   const isValidTarget = (target: TreeNode, pos: DropPosition): boolean => {
@@ -474,19 +447,6 @@ export function PageTree({
     await persist(next, moves, "Could not rename.");
   };
 
-  const toggleLock = async (node: TreeNode, locked: boolean) => {
-    if (busy) {
-      return;
-    }
-    const next: ProjectMeta = {
-      ...local,
-      private: locked
-        ? [...local.private, node.rel]
-        : local.private.filter((rel) => rel.toLowerCase() !== node.rel.toLowerCase()),
-    };
-    await persist(next, [], "Could not change the lock.");
-  };
-
   /**
    * Deletes a folder. An empty folder is just a meta entry, so it goes quietly.
    * A folder holding pages would take them with it, so that asks first and names
@@ -632,16 +592,12 @@ export function PageTree({
           depth={0}
           currentPath={currentPath}
           draggable={editUnlocked}
-          ownsLock={ownsLock}
-          lockedAbove={false}
-          canView={privateUnlocked}
           drag={drag}
           over={over}
           onDragStart={(n) => setDrag({ rel: n.rel, isFolder: isFolderNode(n) })}
           onDragEnd={reset}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
-          onToggleLock={toggleLock}
           onDeleteFolder={deleteFolder}
           onContextMenu={openMenu}
         />

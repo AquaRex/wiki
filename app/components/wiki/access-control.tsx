@@ -1,0 +1,266 @@
+import { useEffect, useState } from "react";
+import { useRevalidator } from "react-router";
+import { Globe, Lock, EyeOff, ShieldCheck, X } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
+import { Input } from "~/components/ui/input";
+import { Button } from "~/components/ui/button";
+import { getStore } from "~/lib/store";
+import type { AccessLevel } from "~/lib/shared";
+
+/*
+ * Sets the access level of a project or page: public (open), locked (visible but
+ * password-gated), or hidden (only allow-listed users see it). Locking prompts
+ * for a password; hiding manages an allow-list of user emails. The password and
+ * grants live server-side (see access-schema.sql) and are never read back.
+ */
+
+const LEVELS: { value: AccessLevel; label: string; icon: React.ReactNode; blurb: string }[] = [
+  { value: "public", label: "Public", icon: <Globe className="size-3.5" />, blurb: "Anyone can see and read it." },
+  { value: "locked", label: "Locked", icon: <Lock className="size-3.5" />, blurb: "Everyone sees it; a password unlocks the content." },
+  { value: "hidden", label: "Hidden", icon: <EyeOff className="size-3.5" />, blurb: "Only the users you list can see it at all." },
+];
+
+export function AccessControl({
+  scope,
+  itemKey,
+  name,
+  current,
+  className,
+}: {
+  scope: "project" | "page";
+  /** project slug, or "slug/rel" for a page. */
+  itemKey: string;
+  /** Display name shown in the popover header. */
+  name: string;
+  current: AccessLevel;
+  className?: string;
+}) {
+  const revalidator = useRevalidator();
+  const [open, setOpen] = useState(false);
+  const [level, setLevel] = useState<AccessLevel>(current);
+  const [password, setPassword] = useState("");
+  const [grants, setGrants] = useState<string[]>([]);
+  const [newEmail, setNewEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setLevel(current);
+  }, [current]);
+
+  // Load the allow-list when the popover opens on a hidden item.
+  useEffect(() => {
+    if (open && level === "hidden") {
+      getStore().listGrants(scope, itemKey).then(setGrants).catch(() => setGrants([]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, level]);
+
+  const store = getStore();
+
+  const chooseLevel = async (next: AccessLevel) => {
+    if (next === level || busy) {
+      return;
+    }
+    // Locking needs a password first — don't switch until one is entered.
+    if (next === "locked") {
+      setLevel("locked");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await store.setAccess(scope, itemKey, next);
+      setLevel(next);
+      revalidator.revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change access.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyLock = async () => {
+    if (!password || busy) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await store.setLockPassword(scope, itemKey, password);
+      await store.setAccess(scope, itemKey, "locked");
+      setPassword("");
+      revalidator.revalidate();
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not lock.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addGrant = async () => {
+    const email = newEmail.trim();
+    if (!email || busy) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await store.addGrant(scope, itemKey, email);
+      setGrants(await store.listGrants(scope, itemKey));
+      setNewEmail("");
+      revalidator.revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add the user.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeGrant = async (email: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      await store.removeGrant(scope, itemKey, email);
+      setGrants(await store.listGrants(scope, itemKey));
+      revalidator.revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove the user.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const CurrentIcon =
+    current === "locked" ? Lock : current === "hidden" ? EyeOff : Globe;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            title={`Access: ${current}`}
+            className={`flex items-center gap-1 rounded font-mono text-[10.5px] uppercase tracking-wider ${
+              current === "public" ? "text-text-faint" : "text-waccent"
+            } ${className ?? ""}`}
+          >
+            <CurrentIcon className="size-3.5" />
+            {current}
+          </button>
+        }
+      />
+      <PopoverContent align="end" className="w-80 gap-3">
+        <div className="flex flex-col gap-1">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-text-faint">
+            Access · {scope}
+          </div>
+          <div className="truncate font-heading text-sm font-semibold">{name}</div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          {LEVELS.map((l) => (
+            <button
+              key={l.value}
+              type="button"
+              onClick={() => chooseLevel(l.value)}
+              disabled={busy}
+              className={`flex items-start gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${
+                level === l.value
+                  ? "border-accent-line bg-accent-soft"
+                  : "border-border hover:bg-surface-2"
+              }`}
+            >
+              <span className={level === l.value ? "text-waccent" : "text-text-faint"}>{l.icon}</span>
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium">{l.label}</span>
+                <span className="block text-[11.5px] text-text-dim">{l.blurb}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {level === "locked" && (
+          <div className="grid gap-2 border-t border-border pt-3">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-text-faint">
+              Set access password
+            </div>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  applyLock();
+                }
+              }}
+              placeholder={current === "locked" ? "Change password…" : "New password"}
+              className="font-mono"
+            />
+            <Button size="sm" onClick={applyLock} disabled={busy || !password}>
+              <Lock className="size-3.5" /> {current === "locked" ? "Update lock" : "Lock it"}
+            </Button>
+            {scope === "project" && (
+              <p className="text-[11px] text-text-dim">
+                Pages inside inherit this lock unless a page sets its own access or password.
+              </p>
+            )}
+          </div>
+        )}
+
+        {level === "hidden" && (
+          <div className="grid gap-2 border-t border-border pt-3">
+            <div className="font-mono text-[10px] uppercase tracking-wider text-text-faint">
+              Who can see it
+            </div>
+            {grants.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                {grants.map((email) => (
+                  <div key={email} className="flex items-center justify-between rounded bg-surface-2 px-2 py-1">
+                    <span className="truncate font-mono text-[12px]">{email}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeGrant(email)}
+                      disabled={busy}
+                      className="text-text-faint hover:text-crit"
+                      aria-label={`Remove ${email}`}
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11.5px] text-text-dim">No one yet — only you (and other editors) can see it.</p>
+            )}
+            <div className="flex gap-2">
+              <Input
+                type="email"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    addGrant();
+                  }
+                }}
+                placeholder="user@example.com"
+                className="font-mono"
+              />
+              <Button size="sm" variant="outline" onClick={addGrant} disabled={busy || !newEmail.trim()}>
+                Add
+              </Button>
+            </div>
+            <p className="text-[11px] text-text-dim">The user needs a wiki account to be added.</p>
+          </div>
+        )}
+
+        {error && <p className="text-[12px] text-crit">{error}</p>}
+
+        <div className="flex items-center gap-1.5 border-t border-border pt-2 text-[11px] text-text-faint">
+          <ShieldCheck className="size-3.5" /> Enforced by the database, not the interface.
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}

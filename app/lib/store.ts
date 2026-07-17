@@ -43,6 +43,18 @@ export interface WikiStore {
    * password. The unlocked copy replaces the blank one in the cache.
    */
   unlockPage(rawPath: string, password: string): Promise<WikiPage>;
+  /** Each project's access level, keyed by slug (lowercased). */
+  getProjectAccess(): Promise<Record<string, AccessLevel>>;
+  /** Sets a project's or page's access level. Locking also needs a password. */
+  setAccess(scope: "project" | "page", key: string, level: AccessLevel): Promise<void>;
+  /** Sets (or clears, with "") the lock password for a project or page. */
+  setLockPassword(scope: "project" | "page", key: string, password: string): Promise<void>;
+  /** The emails granted to see a hidden project/page. */
+  listGrants(scope: "project" | "page", key: string): Promise<string[]>;
+  /** Grants a user (by email) access to a hidden project/page. */
+  addGrant(scope: "project" | "page", key: string, email: string): Promise<void>;
+  /** Revokes a user's grant. */
+  removeGrant(scope: "project" | "page", key: string, email: string): Promise<void>;
   uploadImage(file: File, pagePath: string): Promise<string>;
   /**
    * Maps a stored asset src to a fetchable URL. Private images live in a
@@ -139,7 +151,7 @@ class SupabaseStore implements WikiStore {
   async listPages() {
     const pages = await this.pages();
     return Array.from(pages.values())
-      .map((p) => ({ path: p.path, title: p.title }))
+      .map((p) => ({ path: p.path, title: p.title, access: p.access }))
       .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
   }
 
@@ -424,6 +436,61 @@ class SupabaseStore implements WikiStore {
     };
     (await this.pages()).set(page.path.toLowerCase(), unlocked);
     return unlocked;
+  }
+
+  async getProjectAccess(): Promise<Record<string, AccessLevel>> {
+    const { data, error } = await supabase.from("projects").select("slug,access");
+    fail("Could not load project access", error);
+    const out: Record<string, AccessLevel> = {};
+    for (const row of (data ?? []) as { slug: string; access: AccessLevel }[]) {
+      out[row.slug.toLowerCase()] = row.access ?? "public";
+    }
+    return out;
+  }
+
+  async setAccess(scope: "project" | "page", key: string, level: AccessLevel) {
+    if (scope === "project") {
+      const { error } = await supabase.from("projects").update({ access: level }).eq("slug", key);
+      fail("Could not change project access", error);
+    } else {
+      const { project, rel } = splitPath(key);
+      const { error } = await supabase
+        .from("pages")
+        .update({ access: level })
+        .eq("project_slug", project)
+        .eq("rel", rel);
+      fail("Could not change page access", error);
+    }
+    this.invalidate();
+  }
+
+  async setLockPassword(scope: "project" | "page", key: string, password: string) {
+    const { error } = await supabase.rpc("set_access_password", {
+      p_scope: scope,
+      p_key: key,
+      p_password: password,
+    });
+    fail("Could not set the password", error);
+  }
+
+  async listGrants(scope: "project" | "page", key: string): Promise<string[]> {
+    const { data, error } = await supabase.rpc("list_grants", { p_scope: scope, p_key: key });
+    fail("Could not load the access list", error);
+    return (data ?? []) as string[];
+  }
+
+  async addGrant(scope: "project" | "page", key: string, email: string) {
+    const { error } = await supabase.rpc("grant_access", { p_scope: scope, p_key: key, p_email: email });
+    if (error) {
+      throw new Error(/no such user|not found/i.test(error.message) ? `No user with email ${email}.` : error.message);
+    }
+    this.invalidate();
+  }
+
+  async removeGrant(scope: "project" | "page", key: string, email: string) {
+    const { error } = await supabase.rpc("revoke_access", { p_scope: scope, p_key: key, p_email: email });
+    fail("Could not revoke access", error);
+    this.invalidate();
   }
 
   /**

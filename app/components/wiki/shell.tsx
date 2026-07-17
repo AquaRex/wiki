@@ -22,7 +22,7 @@ export function Shell({
   currentPath: string;
   children: React.ReactNode;
 }) {
-  const { signedIn, editMode, setEditMode, editUnlocked, privateUnlocked, signOut } = useAuth();
+  const { signedIn, editMode, setEditMode, editUnlocked, signOut } = useAuth();
   const meta = useProjectMeta(project);
   const { resolvedTheme, setTheme } = useTheme();
   const location = useLocation();
@@ -61,7 +61,6 @@ export function Shell({
             project={project}
             currentPath={currentPath}
             editUnlocked={editUnlocked}
-            privateUnlocked={privateUnlocked}
             meta={meta}
           />
           <div className="mt-4 border-t border-border pt-3">
