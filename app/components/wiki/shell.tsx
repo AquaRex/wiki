@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useTheme } from "next-themes";
-import { Grid2x2, Moon, Sun, Pencil, LogOut, Plus, Braces } from "lucide-react";
+import { Grid2x2, Moon, Sun, Pencil, Eye, LogOut, Plus, Braces } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { projectDisplayName, type PageSummary } from "~/lib/shared";
 import { useAuth } from "~/lib/auth";
@@ -22,7 +22,7 @@ export function Shell({
   currentPath: string;
   children: React.ReactNode;
 }) {
-  const { editUnlocked, privateUnlocked, signOut } = useAuth();
+  const { signedIn, editMode, setEditMode, editUnlocked, privateUnlocked, signOut } = useAuth();
   const meta = useProjectMeta(project);
   const { resolvedTheme, setTheme } = useTheme();
   const location = useLocation();
@@ -89,15 +89,29 @@ export function Shell({
               <Sun className="size-4 dark:hidden" />
               <Moon className="hidden size-4 dark:block" />
             </Button>
-            {editUnlocked ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => signOut()}
-                className="gap-1.5 font-mono text-[11px] uppercase tracking-wider"
-              >
-                <LogOut className="size-3.5" /> Sign out
-              </Button>
+            {signedIn ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={editMode ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setEditMode(!editMode)}
+                  className="gap-1.5 font-mono text-[11px] uppercase tracking-wider"
+                  title={editMode ? "Switch to preview (read-only)" : "Turn editing on"}
+                >
+                  {editMode ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
+                  {editMode ? "Preview" : "Edit"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => signOut()}
+                  title="Sign out"
+                  aria-label="Sign out"
+                  className="text-text-faint hover:text-foreground"
+                >
+                  <LogOut className="size-4" />
+                </Button>
+              </div>
             ) : (
               <Button
                 variant="ghost"
@@ -109,9 +123,15 @@ export function Shell({
               </Button>
             )}
           </div>
-          {editUnlocked && (
-            <div className="mt-2 rounded-md border border-accent-line bg-accent-soft px-2 py-1 text-center font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-waccent">
-              ● Editing enabled
+          {signedIn && (
+            <div
+              className={`mt-2 rounded-md border px-2 py-1 text-center font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] ${
+                editMode
+                  ? "border-accent-line bg-accent-soft text-waccent"
+                  : "border-border bg-surface-2 text-text-dim"
+              }`}
+            >
+              {editMode ? "● Editing enabled" : "Preview · read-only"}
             </div>
           )}
         </div>

@@ -13,7 +13,7 @@ export function meta() {
 }
 
 export default function Admin() {
-  const { editUnlocked, email: currentEmail, signIn, signOut } = useAuth();
+  const { signedIn, email: currentEmail, signIn, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -45,10 +45,11 @@ export default function Admin() {
         <div className="mb-1 flex items-center gap-2 font-heading text-xl font-bold">
           <ShieldCheck className="size-4 text-waccent" /> Wiki editing
         </div>
-        {editUnlocked ? (
+        {signedIn ? (
           <>
             <p className="mb-6 text-sm text-text-dim">
-              Signed in as <span className="font-mono text-[12.5px] text-waccent">{currentEmail}</span>.
+              Signed in as <span className="font-mono text-[12.5px] text-waccent">{currentEmail}</span>. Use the
+              <span className="text-waccent"> Edit</span> toggle in the sidebar to start editing.
             </p>
             <Button
               variant="outline"
@@ -65,7 +66,8 @@ export default function Admin() {
         ) : (
           <>
             <p className="mb-6 text-sm text-text-dim">
-              Sign in to edit the wiki and read private pages.
+              Sign in to read restricted pages and to edit. You'll start in preview; turn on editing with the
+              sidebar toggle when you're ready.
             </p>
             <div className="grid gap-3">
               <div className="grid gap-1.5">
