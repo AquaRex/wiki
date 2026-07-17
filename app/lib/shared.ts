@@ -3,6 +3,9 @@ export interface WikiBlock {
   text: string;
 }
 
+/** How an item may be seen: open to all, visible-but-password-gated, or hidden. */
+export type AccessLevel = "public" | "locked" | "hidden";
+
 export interface WikiPage {
   path: string;
   /** The page name — drives the URL, sidebar and index. */
@@ -17,6 +20,13 @@ export interface WikiPage {
   tags: string[];
   blocks: WikiBlock[];
   updated: string;
+  /** The page's own access level (before project inheritance). */
+  access: AccessLevel;
+  /**
+   * True when this page is effectively locked and its body was withheld by the
+   * server — header/lede/blocks are blank until unlockPage() succeeds.
+   */
+  locked: boolean;
 }
 
 export interface PageSummary {
@@ -223,6 +233,8 @@ export function blankPage(rawPath: string, title?: string): WikiPage {
     tags: [],
     blocks: [{ id: newBlockId(), text: "Write something…" }],
     updated: "",
+    access: "public",
+    locked: false,
   };
 }
 

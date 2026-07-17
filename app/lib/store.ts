@@ -17,6 +17,7 @@ import {
   type SearchResult,
   type VariableDef,
   type WikiPage,
+  type AccessLevel,
 } from "./shared";
 
 export interface WikiStore {
@@ -36,6 +37,12 @@ export interface WikiStore {
   movePages(moves: PageMove[]): Promise<void>;
   getVariables(): Promise<Record<string, VariableDef>>;
   search(query: string): Promise<SearchResult[]>;
+  /**
+   * Verifies a locked page's password server-side and, on success, returns the
+   * withheld body (header/lede/blocks) merged into the page. Throws on a wrong
+   * password. The unlocked copy replaces the blank one in the cache.
+   */
+  unlockPage(rawPath: string, password: string): Promise<WikiPage>;
   uploadImage(file: File, pagePath: string): Promise<string>;
   /**
    * Maps a stored asset src to a fetchable URL. Private images live in a
@@ -58,7 +65,8 @@ interface PageRow {
   lede: string;
   tags: string[];
   blocks: { id: string; text: string }[];
-  is_private: boolean;
+  access: AccessLevel;
+  is_locked: boolean;
   sort_order: number;
   updated_at: string;
 }
@@ -73,6 +81,8 @@ function rowToPage(row: PageRow): WikiPage {
     tags: row.tags ?? [],
     blocks: row.blocks ?? [],
     updated: row.updated_at ?? "",
+    access: row.access ?? "public",
+    locked: Boolean(row.is_locked),
   };
 }
 
@@ -107,7 +117,9 @@ class SupabaseStore implements WikiStore {
     }
     if (!this.loading) {
       this.loading = (async () => {
-        const { data, error } = await supabase.from("pages").select("*");
+        // pages_public withholds the body of locked pages (blank until unlocked)
+        // and, via its security_invoker RLS, hides pages the viewer may not see.
+        const { data, error } = await supabase.from("pages_public").select("*");
         fail("Could not load pages", error);
         const cache = new Map<string, WikiPage>();
         for (const row of (data ?? []) as PageRow[]) {
@@ -177,22 +189,18 @@ class SupabaseStore implements WikiStore {
     }
     const { project, rel } = splitPath(page.path);
 
-    // A new page inherits its project's lock, and any locked folder above it.
-    const meta = await this.getMeta(project);
-    const rootMeta = await this.getRootMeta();
-    const isPrivate =
-      rootMeta.private.some((s) => s.toLowerCase() === project.toLowerCase()) ||
-      isRelLocked(meta, rel);
-
     const { error } = await supabase.from("pages").insert({
       project_slug: project,
       rel,
       title: page.title,
+      header: page.header,
       eyebrow: page.eyebrow,
       lede: page.lede,
       tags: page.tags,
       blocks: page.blocks,
-      is_private: isPrivate,
+      // A new page starts public; it inherits its project's access at read time
+      // via page_effective_access, so no per-row stamping is needed here.
+      access: "public",
       sort_order: 0,
     });
     fail(`Could not create ${page.path}`, error);
@@ -386,6 +394,36 @@ class SupabaseStore implements WikiStore {
   async search(query: string) {
     const pages = await this.pages();
     return searchInPages(Array.from(pages.values()), query);
+  }
+
+  async unlockPage(rawPath: string, password: string): Promise<WikiPage> {
+    const page = await this.getPage(rawPath);
+    if (!page) {
+      throw new Error(`Page not found: ${rawPath}`);
+    }
+    const { project, rel } = splitPath(page.path);
+    const { data, error } = await supabase.rpc("unlock_page", {
+      p_slug: project,
+      p_rel: rel,
+      p_password: password,
+    });
+    if (error) {
+      // 28000 is the "wrong password" our function raises; surface a clean message.
+      throw new Error(/28000|wrong password/i.test(error.message) ? "Wrong password." : error.message);
+    }
+    const body = Array.isArray(data) ? data[0] : data;
+    if (!body) {
+      throw new Error("Wrong password.");
+    }
+    const unlocked: WikiPage = {
+      ...page,
+      header: body.header ?? "",
+      lede: body.lede ?? "",
+      blocks: body.blocks ?? [],
+      locked: false,
+    };
+    (await this.pages()).set(page.path.toLowerCase(), unlocked);
+    return unlocked;
   }
 
   /**

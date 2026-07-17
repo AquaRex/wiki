@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useRevalidator } from "react-router";
-import { FolderOpen, GripVertical, Lock, Moon, Pencil, Plus, Sun, Trash2, Unlock } from "lucide-react";
+import { FolderOpen, GripVertical, Lock, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { Route } from "./+types/wiki";
 import {
@@ -352,6 +352,64 @@ function LockScreen({ requestedPath, what }: { requestedPath: string; what: stri
   );
 }
 
+/**
+ * The password prompt for a locked (visible-but-gated) page. Styled like the
+ * sign-in card but centred on the item being unlocked: a large verified shield,
+ * the item's name below it, then the password field. On success the unlocked
+ * page replaces the blank one and the caller re-renders it.
+ */
+function AccessPrompt({ page, onUnlocked }: { page: WikiPage; onUnlocked: (unlocked: WikiPage) => void }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (busy || !password) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const unlocked = await getStore().unlockPage(page.path, password);
+      onUnlocked(unlocked);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Wrong password.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-[70vh] items-center justify-center px-6">
+      <div className="w-full max-w-sm rounded-xl border border-border-strong bg-surface p-8 text-center shadow-lg">
+        <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-accent-soft">
+          <ShieldCheck className="size-9 text-waccent" />
+        </div>
+        <div className="eyebrow mb-1 !text-[11px]">Locked</div>
+        <div className="mb-6 font-heading text-xl font-bold">{page.title}</div>
+        <div className="grid gap-3 text-left">
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                submit();
+              }
+            }}
+            placeholder="Access password"
+            className="font-mono"
+            autoFocus
+          />
+          {error && <p className="text-sm text-crit">{error}</p>}
+          <Button onClick={submit} className="w-full" disabled={busy || !password}>
+            {busy ? "Unlocking…" : "Unlock"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotFound({ requestedPath }: { requestedPath: string }) {
   const { editUnlocked } = useAuth();
   const revalidator = useRevalidator();
@@ -508,6 +566,9 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
   const store = getStore();
   const meta = useProjectMeta(loaderData.landing ? "" : (loaderData.project ?? ""));
   const [rootMeta] = useRootMeta();
+  // A locked page unlocked this session — keyed by path so navigating away and
+  // back keeps it open without re-entering the password.
+  const [unlocked, setUnlocked] = useState<Record<string, WikiPage>>({});
 
   useEffect(() => {
     if (location.hash) {
@@ -538,13 +599,17 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
     return <Landing projects={loaderData.projects} />;
   }
 
-  const { page, allPages, requestedPath } = loaderData;
+  const { allPages, requestedPath } = loaderData;
+  // Prefer a copy unlocked this session over the blank locked one from the loader.
+  const page = (loaderData.page && unlocked[loaderData.page.path.toLowerCase()]) || loaderData.page;
   const project = loaderData.project!;
   const variables = loaderData.variables!;
   const projectPages = allPages.filter((p) => pathInProject(p.path, project));
   const currentPath = page?.path ?? requestedPath;
   const lockedProject = isProjectPrivate(rootMeta, project);
   const locked = (lockedProject || isPathLocked(meta, currentPath)) && !privateUnlocked;
+  // A page whose body the server withheld behind a password (access = locked).
+  const needsPassword = Boolean(page?.locked);
 
   const deletePage = async (target: WikiPage) => {
     if (confirm(`Delete the page "${target.title}" permanently?`)) {
@@ -559,6 +624,11 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
         <LockScreen requestedPath={requestedPath} what={lockedProject ? "project" : "page"} />
       ) : !page ? (
         <NotFound requestedPath={requestedPath} />
+      ) : needsPassword ? (
+        <AccessPrompt
+          page={page}
+          onUnlocked={(u) => setUnlocked((prev) => ({ ...prev, [u.path.toLowerCase()]: u }))}
+        />
       ) : (
         <>
           <header className="page-hero">
