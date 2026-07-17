@@ -151,6 +151,26 @@ function isPill(node: UeNode): boolean {
   return node.role === "variable-get";
 }
 
+/**
+ * A reroute / knot is not a real node — it's just a draggable bend point on a
+ * wire. It renders as a small dot and its two wires (in and out) pass through it.
+ */
+function isReroute(node: UeNode): boolean {
+  return (
+    node.classLeaf === "MaterialExpressionReroute" ||
+    node.classLeaf === "K2Node_Knot" ||
+    node.classLeaf.endsWith("RerouteNode")
+  );
+}
+
+const REROUTE_SIZE = 14;
+
+/** The colour of a reroute dot — taken from whichever pin carries a type. */
+function rerouteColor(node: UeNode): string {
+  const pin = [...node.outputs, ...node.inputs].find((p) => p.category || p.subType);
+  return pin ? pinColor(pin) : "#c0c4c8";
+}
+
 /** The variable's type colour — from the Get node's single output pin. */
 function pillColor(node: UeNode): string {
   const out = node.outputs[0];
@@ -171,6 +191,9 @@ function pillLabel(node: UeNode): string {
 }
 
 function nodeWidth(node: UeNode): number {
+  if (isReroute(node)) {
+    return REROUTE_SIZE;
+  }
   if (isPill(node)) {
     // Name text + a pin dot at each end.
     return Math.max(56, pillLabel(node).length * CHAR_W + 34);
@@ -194,6 +217,9 @@ function nodeWidth(node: UeNode): number {
 }
 
 function nodeHeight(node: UeNode): number {
+  if (isReroute(node)) {
+    return REROUTE_SIZE;
+  }
   if (isPill(node)) {
     return 30;
   }
@@ -221,7 +247,7 @@ function place(
 
 /** A pin's Y offset from the top of its node (for alignment maths). */
 function pinOffsetY(node: UeNode, pinId: string): number | null {
-  if (isPill(node)) {
+  if (isPill(node) || isReroute(node)) {
     return nodeHeight(node) / 2;
   }
   const rowY = (idx: number) => HEADER_H + PINS_TOP + idx * PIN_ROW_H + PIN_ROW_H / 2;
@@ -238,6 +264,11 @@ function pinOffsetY(node: UeNode, pinId: string): number | null {
 
 /** Anchor point (canvas coords) for a pin on a placed node. */
 function pinAnchor(p: Placed, pinId: string): { x: number; y: number; cat: string } | null {
+  // A reroute is a single point — both its wires meet at the dot's centre.
+  if (isReroute(p.node)) {
+    const pin = [...p.node.inputs, ...p.node.outputs].find((pn) => pn.id === pinId);
+    return { x: p.x + p.w / 2, y: p.y + p.h / 2, cat: pin?.category ?? "" };
+  }
   // A pill-rendered node (variable Get) has no pin rows — anchor at its middle.
   if (isPill(p.node)) {
     return { x: p.x + p.w, y: p.y + p.h / 2, cat: p.node.outputs[0]?.category ?? "" };
@@ -316,6 +347,30 @@ function NodeBox({
       onNodeDown(p.node.name, e);
     }
   };
+
+  // A reroute / knot is just a bend point on the wire — a small draggable dot.
+  if (isReroute(p.node)) {
+    const color = rerouteColor(p.node);
+    return (
+      <div
+        onPointerDown={onDown}
+        title="Reroute"
+        style={{
+          position: "absolute",
+          left: p.x,
+          top: p.y,
+          width: p.w,
+          height: p.h,
+          borderRadius: "50%",
+          background: color,
+          border: `2px solid ${selected ? "#ffb300" : "#0b0e10"}`,
+          boxShadow: selected ? "0 0 0 2px rgba(255,179,0,0.6)" : undefined,
+          cursor: "move",
+          userSelect: "none",
+        }}
+      />
+    );
+  }
 
   // A variable Get is a compact coloured pill with just the variable name.
   if (isPill(p.node)) {

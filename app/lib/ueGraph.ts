@@ -222,6 +222,20 @@ function unquote(value: string | null): string {
   return trimmed;
 }
 
+/**
+ * The macro's name from a MacroGraphReference tuple. The path ends with the
+ * macro identifier after the final ":", "." or "/", e.g.
+ *   MacroGraph="…StandardMacros.StandardMacros:ForLoop'"  ->  "ForLoop"
+ * Macros come from many packages, but the trailing segment is the display name.
+ */
+function macroName(tuple: string | null): string {
+  if (!tuple) {
+    return "";
+  }
+  const m = /MacroGraph="[^"]*?[:./]([A-Za-z0-9_]+)'?"/.exec(tuple);
+  return m ? m[1] : "";
+}
+
 /** Pulls MemberName out of a `(…MemberName="X"…)` tuple. */
 function memberName(tuple: string | null): string {
   if (!tuple) {
@@ -259,6 +273,8 @@ function nodeTitle(classLeaf: string, headerLines: string[], innerLines: string[
       return "Branch";
     case "K2Node_ExecutionSequence":
       return "Sequence";
+    case "K2Node_MacroInstance":
+      return humanise(macroName(fieldValue(header, "MacroGraphReference"))) || "Macro";
     case "K2Node_DynamicCast":
       return "Cast";
     case "K2Node_CommutativeAssociativeBinaryOperator":
@@ -445,8 +461,10 @@ export function parseUeGraph(text: string): UeGraph {
       }
       const innerBegin = CLASS_RE.exec(body);
       if (innerBegin || /^Begin Object\b/.test(body)) {
-        // First nested class is the material node's real expression type.
-        if (innerBegin && !innerClassLeaf && classLeaf === "MaterialGraphNode") {
+        // First nested class is the material node's real expression type. This
+        // covers the plain wrapper and its variants (e.g. MaterialGraphNode_Knot,
+        // whose inner class is MaterialExpressionReroute).
+        if (innerBegin && !innerClassLeaf && classLeaf.startsWith("MaterialGraphNode")) {
           innerClassLeaf = innerBegin[1].split(/[./]/).pop() ?? "";
         }
         depth++;
