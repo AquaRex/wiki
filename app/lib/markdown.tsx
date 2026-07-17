@@ -322,6 +322,13 @@ interface DirectiveLines {
   lines: string[];
 }
 
+const CALLOUT_ICONS: Record<string, string> = {
+  error: "✕",
+  warn: "!",
+  good: "✓",
+  tips: "i",
+};
+
 function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNode {
   const body = dir.lines;
   switch (dir.type) {
@@ -341,15 +348,17 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
         </div>
       );
     }
+    case "error":
     case "pitfall":
     case "warn":
-    case "good": {
-      const icon = dir.type === "pitfall" ? "✕" : dir.type === "warn" ? "!" : "✓";
-      const cls = dir.type === "pitfall" ? "pitfall" : `pitfall ${dir.type}`;
+    case "good":
+    case "tips": {
+      // "pitfall" is the old name for "error" — kept so existing pages render.
+      const kind = dir.type === "pitfall" ? "error" : dir.type;
       const text = [dir.param, ...body].filter(Boolean).join("\n");
       return (
-        <div key={k()} className={cls}>
-          <span className="icon">{icon}</span>
+        <div key={k()} className={`callout-box ${kind === "error" ? "" : kind}`.trim()}>
+          <span className="icon">{CALLOUT_ICONS[kind]}</span>
           <p>{renderInline(text.replace(/\n/g, " "), ctx)}</p>
         </div>
       );

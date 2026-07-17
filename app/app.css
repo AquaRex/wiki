@@ -24,6 +24,8 @@
   --crit-bg: #f6e7e7;
   --warn: #8a5a10;
   --warn-bg: #f5ead4;
+  --info: #2c6291;
+  --info-bg: #e4eef7;
   --card-shadow: 0 1px 2px rgba(20, 25, 35, 0.05), 0 8px 24px rgba(20, 25, 35, 0.06);
   --measure: 100ch;
 
@@ -75,6 +77,8 @@
   --crit-bg: #2a1717;
   --warn: #d99b3f;
   --warn-bg: #251d0f;
+  --info: #6aa9dd;
+  --info-bg: #14202a;
   --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
 
   --primary-foreground: #1a1206;
@@ -350,7 +354,8 @@
   margin: 6px 0;
 }
 
-.wiki .pitfall {
+/* Icon callouts: :::error, :::warn, :::good, :::tips */
+.wiki .callout-box {
   display: flex;
   gap: 14px;
   padding: 16px 18px;
@@ -359,27 +364,34 @@
   border: 1px solid var(--wborder);
   border-radius: 9px;
 }
-.wiki .pitfall .icon {
+.wiki .callout-box .icon {
   color: var(--crit);
   font-weight: 700;
   flex: none;
   font-family: var(--font-mono);
+  line-height: 1.5;
 }
-.wiki .pitfall p {
+.wiki .callout-box p {
   margin: 0;
   font-size: 15px;
 }
-.wiki .pitfall.warn {
+.wiki .callout-box.warn {
   background: var(--warn-bg);
 }
-.wiki .pitfall.warn .icon {
+.wiki .callout-box.warn .icon {
   color: var(--warn);
 }
-.wiki .pitfall.good {
+.wiki .callout-box.good {
   background: var(--good-bg);
 }
-.wiki .pitfall.good .icon {
+.wiki .callout-box.good .icon {
   color: var(--good);
+}
+.wiki .callout-box.tips {
+  background: var(--info-bg);
+}
+.wiki .callout-box.tips .icon {
+  color: var(--info);
 }
 
 .wiki .table-scroll {

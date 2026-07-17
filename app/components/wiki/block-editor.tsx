@@ -54,7 +54,8 @@ const SNIPPETS: Snippet[] = [
   },
   { label: "Callout", icon: <Info className="size-3.5" />, text: ":::callout The core idea\nThe headline statement.\n\nSupporting detail.\n:::", block: true },
   { label: "Note", icon: <MessageSquareWarning className="size-3.5" />, text: ":::note Worth knowing\nA side remark.\n:::", block: true },
-  { label: "Pitfall", icon: <TriangleAlert className="size-3.5" />, text: ":::pitfall\n**The mistake.** Why it goes wrong and what to do instead.\n:::", block: true },
+  { label: "Tips", icon: <Info className="size-3.5" />, text: ":::tips\n**The tip.** Something helpful that isn't obvious.\n:::", block: true },
+  { label: "Error", icon: <TriangleAlert className="size-3.5" />, text: ":::error\n**The mistake.** Why it goes wrong and what to do instead.\n:::", block: true },
   {
     label: "Infobox",
     icon: <PanelRight className="size-3.5" />,
