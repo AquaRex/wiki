@@ -41,10 +41,16 @@ const PIN_COLOR: Record<string, string> = {
   class: "#8b53d6",
   delegate: "#ff2b2b",
   interface: "#ffb300",
+  // Material graph pin categories.
+  materialinput: "#d0d0d0",
+  optional: "#7f9f7f",
+  required: "#d0d0d0",
+  mask: "#c8c8c8",
 };
 
 function pinColor(category: string): string {
-  return PIN_COLOR[category] ?? "#9aa0a6";
+  // Material data pins often have an empty category — treat as a neutral wire.
+  return PIN_COLOR[category] ?? "#c0c4c8";
 }
 
 /** Header tint by node kind — a rough nod to UE's node-title colours. */
@@ -257,17 +263,55 @@ export function UnrealGraph({ source }: { source: string }) {
   const [copied, setCopied] = useState(false);
   const pan = useRef<{ startX: number; startY: number; viewX: number; viewY: number } | null>(null);
 
-  // Fit the graph into the measured viewport once it has mounted, and again if a
-  // fresh paste comes in. Runs before paint so the graph never flashes at 0,0.
-  useLayoutEffect(() => {
+  const current = view ?? { x: 0, y: 0, scale: 1 };
+
+  // A ref mirror of the live view so the non-passive wheel listener (attached
+  // natively below) reads current values without re-subscribing every render.
+  const viewRef = useRef(current);
+  viewRef.current = current;
+
+  const fit = () => {
     const el = wrapRef.current;
     if (el) {
       setView(fitView(placed, el.clientWidth, el.clientHeight));
     }
+  };
+
+  /*
+   * Zoom on wheel, and — crucially — stop the page from scrolling when the
+   * cursor is over the viewport. React's onWheel is registered passive, so its
+   * preventDefault is ignored; only a native non-passive listener can block the
+   * page scroll. Attached here rather than via onWheel for that reason.
+   */
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) {
+      return;
+    }
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const v = viewRef.current;
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const next = Math.min(2.5, Math.max(0.1, v.scale * factor));
+      setView({
+        scale: next,
+        x: px - ((px - v.x) / v.scale) * next,
+        y: py - ((py - v.y) / v.scale) * next,
+      });
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, []);
+
+  // Fit on mount and whenever a fresh paste comes in. Before paint, so the graph
+  // never flashes at 0,0.
+  useLayoutEffect(() => {
+    fit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source]);
-
-  const current = view ?? { x: 0, y: 0, scale: 1 };
 
   const toCanvas = (clientX: number, clientY: number) => {
     const rect = wrapRef.current!.getBoundingClientRect();
@@ -277,22 +321,9 @@ export function UnrealGraph({ source }: { source: string }) {
     };
   };
 
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const rect = wrapRef.current!.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const next = Math.min(2.5, Math.max(0.1, current.scale * factor));
-    // Keep the point under the cursor fixed while zooming.
-    setView({
-      scale: next,
-      x: px - ((px - current.x) / current.scale) * next,
-      y: py - ((py - current.y) / current.scale) * next,
-    });
-  };
-
   const onPointerDown = (e: React.PointerEvent) => {
+    // Focus the viewport so "F" (fit) works after interacting with it.
+    wrapRef.current?.focus({ preventScroll: true });
     if (e.button === 2 || e.button === 1 || (e.button === 0 && e.altKey)) {
       // Right / middle / alt-left drag pans.
       pan.current = { startX: e.clientX, startY: e.clientY, viewX: current.x, viewY: current.y };
@@ -414,12 +445,18 @@ export function UnrealGraph({ source }: { source: string }) {
       <div
         ref={wrapRef}
         className="ue-graph-viewport"
-        onWheel={onWheel}
+        tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
-        onDoubleClick={() => setView(fitView(placed, wrapRef.current!.clientWidth, wrapRef.current!.clientHeight))}
+        onDoubleClick={fit}
+        onKeyDown={(e) => {
+          if (e.key === "f" || e.key === "F") {
+            e.preventDefault();
+            fit();
+          }
+        }}
         // The dot grid rides the pan/zoom so movement is visible: its size scales
         // with zoom and its origin tracks the canvas translation.
         style={{
@@ -476,7 +513,7 @@ export function UnrealGraph({ source }: { source: string }) {
             />
           )}
         </div>
-        <div className="ue-graph-hint">Scroll to zoom · right-drag to pan · drag to select · double-click to fit</div>
+        <div className="ue-graph-hint">Scroll to zoom · right-drag to pan · drag to select · F or double-click to fit</div>
       </div>
     </div>
   );

@@ -1004,6 +1004,10 @@
 .wiki .ue-graph-viewport:active {
   cursor: grabbing;
 }
+.wiki .ue-graph-viewport:focus,
+.wiki .ue-graph-viewport:focus-visible {
+  outline: none;
+}
 .wiki .ue-graph-canvas {
   position: absolute;
   top: 0;

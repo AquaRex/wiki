@@ -179,8 +179,9 @@ function humanise(raw: string): string {
     .trim();
 }
 
-function nodeTitle(classLeaf: string, headerLines: string[]): string {
+function nodeTitle(classLeaf: string, headerLines: string[], innerLines: string[] = []): string {
   const header = headerLines.join("\n");
+  const inner = innerLines.join("\n");
   const member = () => humanise(memberName(fieldValue(header, "EventReference") ?? fieldValue(header, "FunctionReference") ?? fieldValue(header, "VariableReference")));
   switch (classLeaf) {
     case "K2Node_Event":
@@ -200,10 +201,25 @@ function nodeTitle(classLeaf: string, headerLines: string[]): string {
     case "K2Node_CommutativeAssociativeBinaryOperator":
     case "K2Node_PromotableOperator":
       return member() || "Operator";
+    // --- Material expression nodes -------------------------------------
+    case "MaterialGraphNode_Root":
+      return "Material";
+    case "MaterialExpressionReroute":
+      return "Reroute";
     default:
-      // MaterialExpressionConstant3Vector -> "Constant3 Vector"; K2Node_Foo -> "Foo".
-      return humanise(classLeaf.replace(/^K2Node_/, "").replace(/^MaterialExpression/, ""));
+      break;
   }
+  if (classLeaf.startsWith("MaterialExpression")) {
+    const base = humanise(classLeaf.replace(/^MaterialExpression/, ""));
+    // Parameters and named constants carry their name — show it.
+    const paramName = unquote(fieldValue(inner, "ParameterName"));
+    if (paramName) {
+      return `${base} (${paramName})`;
+    }
+    return base;
+  }
+  // K2Node_Foo -> "Foo"; anything else -> humanised leaf.
+  return humanise(classLeaf.replace(/^K2Node_/, ""));
 }
 
 /** Parses one `CustomProperties Pin (…)` line. */
@@ -293,46 +309,92 @@ export function parseUeGraph(text: string): UeGraph {
     const classPath = begin[1];
     const name = begin[2];
     const classLeaf = classPath.split(/[./]/).pop() ?? classPath;
-    if (classLeaf.startsWith("K2Node")) {
-      kindVote.blueprint++;
-    } else if (classLeaf.startsWith("MaterialExpression")) {
-      kindVote.material++;
-    }
 
     // Keep the untrimmed lines so the node can be re-emitted for Unreal exactly
-    // as it was pasted, including indentation.
+    // as it was pasted, including indentation. Pins are read from the OUTER level
+    // only; a node's header may contain nested Begin/End Object blocks (material
+    // nodes wrap a MaterialExpression), so depth-track to find the matching End
+    // and to skip pins/headers that belong to inner objects.
     const rawLines: string[] = [lines[i]];
     const headerLines: string[] = [];
+    const innerLines: string[] = [];
     const pins: UePin[] = [];
+    let innerClassLeaf = "";
+    let depth = 1;
     i++;
-    while (i < lines.length && lines[i].trim() !== "End Object") {
-      rawLines.push(lines[i]);
-      const body = lines[i].trim();
-      if (body.startsWith("CustomProperties Pin")) {
-        const pin = parsePin(body);
-        if (pin) {
-          pins.push(pin);
+    while (i < lines.length && depth > 0) {
+      const rawLine = lines[i];
+      const body = rawLine.trim();
+      if (body === "End Object") {
+        depth--;
+        rawLines.push(rawLine);
+        i++;
+        continue;
+      }
+      const innerBegin = CLASS_RE.exec(body);
+      if (innerBegin || /^Begin Object\b/.test(body)) {
+        // First nested class is the material node's real expression type.
+        if (innerBegin && !innerClassLeaf && classLeaf === "MaterialGraphNode") {
+          innerClassLeaf = innerBegin[1].split(/[./]/).pop() ?? "";
+        }
+        depth++;
+        rawLines.push(rawLine);
+        if (depth > 1) {
+          innerLines.push(body);
+        }
+        i++;
+        continue;
+      }
+      rawLines.push(rawLine);
+      if (depth === 1) {
+        if (body.startsWith("CustomProperties Pin")) {
+          const pin = parsePin(body);
+          if (pin) {
+            pins.push(pin);
+          }
+        } else {
+          headerLines.push(body);
         }
       } else {
-        headerLines.push(body);
+        innerLines.push(body);
       }
       i++;
     }
-    if (i < lines.length) {
-      rawLines.push(lines[i]); // the "End Object" line
-    }
-    i++; // consume "End Object"
 
-    const posX = Number(fieldValue(headerLines.join("\n"), "NodePosX") ?? 0);
-    const posY = Number(fieldValue(headerLines.join("\n"), "NodePosY") ?? 0);
+    // The effective type: for a material node, the wrapped expression class.
+    const effLeaf = innerClassLeaf || classLeaf;
+    if (effLeaf.startsWith("K2Node")) {
+      kindVote.blueprint++;
+    } else if (
+      classLeaf.startsWith("MaterialGraphNode") ||
+      effLeaf.startsWith("MaterialExpression")
+    ) {
+      kindVote.material++;
+    }
+
+    // Positions: outer NodePosX/Y when present, else the inner expression's
+    // MaterialExpressionEditorX/Y (material nodes store the position there).
+    const header = headerLines.join("\n");
+    const inner = innerLines.join("\n");
+    const num = (v: string | null) => {
+      if (v === null || v.trim() === "") {
+        return null; // Number("") and Number(null) are both 0 — reject explicitly.
+      }
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const posX =
+      num(fieldValue(header, "NodePosX")) ?? num(fieldValue(inner, "MaterialExpressionEditorX")) ?? 0;
+    const posY =
+      num(fieldValue(header, "NodePosY")) ?? num(fieldValue(inner, "MaterialExpressionEditorY")) ?? 0;
 
     nodes.push({
       name,
       className: classPath,
-      classLeaf,
-      posX: Number.isFinite(posX) ? posX : 0,
-      posY: Number.isFinite(posY) ? posY : 0,
-      title: nodeTitle(classLeaf, headerLines),
+      classLeaf: effLeaf,
+      posX,
+      posY,
+      title: nodeTitle(effLeaf, headerLines, innerLines),
       inputs: pins.filter((p) => p.direction === "input" && !p.hidden),
       outputs: pins.filter((p) => p.direction === "output" && !p.hidden),
       raw: rawLines.join("\n"),
