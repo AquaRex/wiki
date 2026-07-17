@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { UnrealGraph } from "~/components/wiki/unreal-graph";
 
 export interface RenderVariable {
   name: string;
@@ -555,6 +556,12 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
           <div className="callout-body">{renderMarkdown(text, ctx)}</div>
         </div>
       );
+    }
+    case "blueprint":
+    case "material": {
+      // The body is raw Unreal T3D text, kept verbatim so it round-trips back
+      // into the editor. UnrealGraph only reads it to draw.
+      return <UnrealGraph key={k()} source={body.join("\n")} />;
     }
     case "infobox": {
       let image = "";

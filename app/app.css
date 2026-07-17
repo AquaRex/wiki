@@ -947,3 +947,103 @@
   line-height: 1.7;
   tab-size: 2;
 }
+
+/* ---- Unreal node graph viewer (:::blueprint / :::material) ---- */
+.wiki .ue-graph {
+  margin: 22px 0;
+  border: 1px solid var(--wborder);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0d1013;
+}
+.wiki .ue-graph-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: #12171c;
+  border-bottom: 1px solid #000;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.wiki .ue-graph-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: #a6ff00;
+}
+.wiki .ue-graph-count {
+  color: #8b9298;
+}
+.wiki .ue-graph-copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid #2a333b;
+  background: #1a222a;
+  color: #d4d8dc;
+  cursor: pointer;
+}
+.wiki .ue-graph-copy:hover {
+  background: #232d36;
+  color: #fff;
+}
+.wiki .ue-graph-viewport {
+  position: relative;
+  height: 520px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  /* Dot grid, UE style. */
+  background-color: #0d1013;
+  background-image: radial-gradient(circle, #20262c 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.wiki .ue-graph-viewport:active {
+  cursor: grabbing;
+}
+.wiki .ue-graph-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.wiki .ue-graph-wires {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.wiki .ue-graph-marquee {
+  position: absolute;
+  border: 1px solid #ffb300;
+  background: rgba(255, 179, 0, 0.12);
+  pointer-events: none;
+}
+.wiki .ue-graph-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #6a7178;
+  background: rgba(13, 16, 19, 0.7);
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+.wiki .ue-graph-empty {
+  margin: 22px 0;
+  padding: 16px;
+  border: 1px dashed var(--wborder);
+  border-radius: 10px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
