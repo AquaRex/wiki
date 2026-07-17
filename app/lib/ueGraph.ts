@@ -80,6 +80,49 @@ export interface UeGraph {
 }
 
 /**
+ * Rewrites a node's exported position in its raw T3D so a moved node pastes back
+ * into Unreal at its new spot. Updates the outer NodePosX/Y when present; for a
+ * material node (position stored on the inner expression) it also updates
+ * MaterialExpressionEditorX/Y. Inserts NodePosX/Y after the Begin Object line if
+ * the node had none. Rounds to whole grid units, as Unreal exports them.
+ */
+export function withNodePosition(raw: string, x: number, y: number): string {
+  const ix = Math.round(x);
+  const iy = Math.round(y);
+  const lines = raw.split("\n");
+  let sawX = false;
+  let sawY = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*NodePosX=/.test(lines[i])) {
+      lines[i] = lines[i].replace(/NodePosX=-?\d+/, `NodePosX=${ix}`);
+      sawX = true;
+    } else if (/^\s*NodePosY=/.test(lines[i])) {
+      lines[i] = lines[i].replace(/NodePosY=-?\d+/, `NodePosY=${iy}`);
+      sawY = true;
+    } else if (/^\s*MaterialExpressionEditorX=/.test(lines[i])) {
+      lines[i] = lines[i].replace(/MaterialExpressionEditorX=-?\d+/, `MaterialExpressionEditorX=${ix}`);
+    } else if (/^\s*MaterialExpressionEditorY=/.test(lines[i])) {
+      lines[i] = lines[i].replace(/MaterialExpressionEditorY=-?\d+/, `MaterialExpressionEditorY=${iy}`);
+    }
+  }
+  // A node with no outer NodePosX/Y (e.g. some material roots) gets them added
+  // just after its Begin Object line, matching Unreal's indentation.
+  if (!sawX || !sawY) {
+    const insertAt = 1;
+    const indent = /^(\s*)/.exec(lines[insertAt] ?? "")?.[1] ?? "   ";
+    const additions: string[] = [];
+    if (!sawX) {
+      additions.push(`${indent}NodePosX=${ix}`);
+    }
+    if (!sawY) {
+      additions.push(`${indent}NodePosY=${iy}`);
+    }
+    lines.splice(insertAt, 0, ...additions);
+  }
+  return lines.join("\n");
+}
+
+/**
  * Splits the top-level `key=value` pairs of one line, respecting quotes and
  * balanced parentheses so nested tuples like `LinkedTo=(A B,C D,)` or
  * `NSLOCTEXT("K2Node","true","true")` are not torn apart on their inner commas.

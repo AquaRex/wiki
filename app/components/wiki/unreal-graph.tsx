@@ -1,8 +1,36 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Copy, Check } from "lucide-react";
-import { parseUeGraph, type UeGraph, type UeNode, type UePin, type UeRole } from "~/lib/ueGraph";
+import { parseUeGraph, withNodePosition, type UeGraph, type UeNode, type UePin, type UeRole } from "~/lib/ueGraph";
 
 const GRID = 24;
+
+/**
+ * Keeps a viewport error contained to the block instead of blanking the whole
+ * page via the app-level error boundary. The raw paste is still shown so nothing
+ * pasted is ever lost.
+ */
+class GraphBoundary extends React.Component<
+  { source: string; children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="ue-graph-empty">
+          This graph couldn’t be drawn. Its text is preserved below and still copies back into Unreal.
+          <pre style={{ marginTop: 10, maxHeight: 200, overflow: "auto", whiteSpace: "pre-wrap" }}>
+            {this.props.source}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 /*
  * A read-only, pan/zoom/select viewer for Unreal Engine node graphs pasted as
@@ -139,14 +167,20 @@ function nodeHeight(node: UeNode): number {
   return HEADER_H + PINS_TOP + rows * PIN_ROW_H + PIN_PAD;
 }
 
-function place(graph: UeGraph): { placed: Placed[]; byName: Map<string, Placed> } {
-  const placed = graph.nodes.map((node) => ({
-    node,
-    x: node.posX,
-    y: node.posY,
-    w: nodeWidth(node),
-    h: nodeHeight(node),
-  }));
+function place(
+  graph: UeGraph,
+  moved: Record<string, { x: number; y: number }> = {}
+): { placed: Placed[]; byName: Map<string, Placed> } {
+  const placed = graph.nodes.map((node) => {
+    const override = moved[node.name];
+    return {
+      node,
+      x: override ? override.x : node.posX,
+      y: override ? override.y : node.posY,
+      w: nodeWidth(node),
+      h: nodeHeight(node),
+    };
+  });
   const byName = new Map(placed.map((p) => [p.node.name, p]));
   return { placed, byName };
 }
@@ -217,18 +251,18 @@ function PinRow({ pin, side }: { pin: UePin; side: "left" | "right" }) {
 function NodeBox({
   p,
   selected,
-  onSelect,
+  onNodeDown,
 }: {
   p: Placed;
   selected: boolean;
-  onSelect: (name: string, additive: boolean) => void;
+  onNodeDown: (name: string, e: React.PointerEvent) => void;
 }) {
   const onDown = (e: React.PointerEvent) => {
-    // Clicking a node selects it (Ctrl/Shift to add), rather than starting a
-    // marquee on the canvas behind it.
+    // Left-press on a node begins select + drag; it must not fall through to the
+    // canvas (which would start a marquee).
     if (e.button === 0) {
       e.stopPropagation();
-      onSelect(p.node.name, e.ctrlKey || e.shiftKey || e.metaKey);
+      onNodeDown(p.node.name, e);
     }
   };
 
@@ -282,7 +316,7 @@ function NodeBox({
         boxShadow: selected ? "0 0 0 2px rgba(255,179,0,0.5)" : "0 3px 10px rgba(0,0,0,0.5)",
         overflow: "hidden",
         userSelect: "none",
-        cursor: "pointer",
+        cursor: "move",
       }}
     >
       <div
@@ -350,14 +384,34 @@ function fitView(placed: Placed[], vw: number, vh: number): View {
 }
 
 export function UnrealGraph({ source }: { source: string }) {
+  return (
+    <GraphBoundary source={source}>
+      <UnrealGraphInner source={source} />
+    </GraphBoundary>
+  );
+}
+
+function UnrealGraphInner({ source }: { source: string }) {
   const graph = useMemo(() => parseUeGraph(source), [source]);
-  const { placed, byName } = useMemo(() => place(graph), [graph]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  // Per-node position overrides from dragging, keyed by node name. A fresh paste
+  // resets them (keyed on source via useMemo below).
+  const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
   const pan = useRef<{ startX: number; startY: number; viewX: number; viewY: number } | null>(null);
+  // An in-progress node drag: which nodes, and their start positions.
+  const nodeDrag = useRef<{
+    startX: number;
+    startY: number;
+    names: string[];
+    origins: Record<string, { x: number; y: number }>;
+    dragged: boolean;
+  } | null>(null);
+
+  const { placed, byName } = useMemo(() => place(graph, moved), [graph, moved]);
 
   const current = view ?? { x: 0, y: 0, scale: 1 };
 
@@ -402,9 +456,10 @@ export function UnrealGraph({ source }: { source: string }) {
     return () => el.removeEventListener("wheel", handler);
   }, []);
 
-  // Fit on mount and whenever a fresh paste comes in. Before paint, so the graph
-  // never flashes at 0,0.
+  // Fit on mount and whenever a fresh paste comes in, and drop any drag overrides
+  // from a previous paste. Before paint, so the graph never flashes at 0,0.
   useLayoutEffect(() => {
+    setMoved({});
     fit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source]);
@@ -417,24 +472,85 @@ export function UnrealGraph({ source }: { source: string }) {
     };
   };
 
+  // Pointer capture keeps events flowing during a drag, but throws if the target
+  // is detached or the pointer is already gone — capture on the stable viewport
+  // element and never let a capture failure blow up the render tree.
+  const capture = (e: React.PointerEvent) => {
+    try {
+      wrapRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      /* pointer already released — ignore */
+    }
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     // Focus the viewport so "F" (fit) works after interacting with it.
     wrapRef.current?.focus({ preventScroll: true });
     if (e.button === 2 || e.button === 1 || (e.button === 0 && e.altKey)) {
       // Right / middle / alt-left drag pans.
       pan.current = { startX: e.clientX, startY: e.clientY, viewX: current.x, viewY: current.y };
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      capture(e);
       e.preventDefault();
       return;
     }
     if (e.button === 0) {
       const c = toCanvas(e.clientX, e.clientY);
       setMarquee({ x0: c.x, y0: c.y, x1: c.x, y1: c.y });
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      capture(e);
     }
   };
 
+  // Press on a node: adjust the selection, then arm a drag. Whether the node
+  // moves alone or with the whole selection is decided here so the drag can move
+  // every currently-selected node together.
+  const onNodeDown = (name: string, e: React.PointerEvent) => {
+    const additive = e.ctrlKey || e.shiftKey || e.metaKey;
+    let nextSel: Set<string>;
+    if (additive) {
+      nextSel = new Set(selection);
+      if (nextSel.has(name)) {
+        nextSel.delete(name);
+      } else {
+        nextSel.add(name);
+      }
+    } else if (selection.has(name)) {
+      // Pressing an already-selected node keeps the selection (so a group drags).
+      nextSel = new Set(selection);
+    } else {
+      nextSel = new Set([name]);
+    }
+    setSelection(nextSel);
+
+    // Drag every selected node (or just this one if it wasn't/ isn't selected).
+    const names = nextSel.has(name) ? [...nextSel] : [name];
+    const origins: Record<string, { x: number; y: number }> = {};
+    for (const p of placed) {
+      if (names.includes(p.node.name)) {
+        origins[p.node.name] = { x: p.x, y: p.y };
+      }
+    }
+    nodeDrag.current = { startX: e.clientX, startY: e.clientY, names, origins, dragged: false };
+    capture(e);
+  };
+
   const onPointerMove = (e: React.PointerEvent) => {
+    if (nodeDrag.current) {
+      const d = nodeDrag.current;
+      const dx = (e.clientX - d.startX) / current.scale;
+      const dy = (e.clientY - d.startY) / current.scale;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        d.dragged = true;
+      }
+      setMoved((prev) => {
+        const next = { ...prev };
+        for (const nm of d.names) {
+          const o = d.origins[nm];
+          next[nm] = { x: o.x + dx, y: o.y + dy };
+        }
+        return next;
+      });
+      return;
+    }
     if (pan.current) {
       setView({
         scale: current.scale,
@@ -450,6 +566,7 @@ export function UnrealGraph({ source }: { source: string }) {
   };
 
   const onPointerUp = () => {
+    nodeDrag.current = null;
     if (marquee) {
       const lx = Math.min(marquee.x0, marquee.x1);
       const rx = Math.max(marquee.x0, marquee.x1);
@@ -470,37 +587,26 @@ export function UnrealGraph({ source }: { source: string }) {
     pan.current = null;
   };
 
-  const toggleSelect = (name: string, additive: boolean) => {
-    setSelection((prev) => {
-      if (additive) {
-        const next = new Set(prev);
-        if (next.has(name)) {
-          next.delete(name);
-        } else {
-          next.add(name);
-        }
-        return next;
-      }
-      // Plain click on the only selected node clears it; otherwise selects just it.
-      if (prev.size === 1 && prev.has(name)) {
-        return new Set();
-      }
-      return new Set([name]);
-    });
+  // The text to copy: the selected nodes (or the whole graph if none selected),
+  // each with any drag applied to its exported NodePosX/Y so a moved node pastes
+  // back into Unreal where you dragged it.
+  const copyText = () => {
+    const chosen = selection.size > 0 ? graph.nodes.filter((n) => selection.has(n.name)) : graph.nodes;
+    const anyMoved = chosen.some((n) => moved[n.name]);
+    if (selection.size === 0 && !anyMoved) {
+      return source; // untouched — hand back the exact original
+    }
+    return chosen
+      .map((n) => {
+        const m = moved[n.name];
+        return m ? withNodePosition(n.raw, m.x, m.y) : n.raw;
+      })
+      .join("\n");
   };
 
-  // Copy the selected nodes back out for Unreal — or the whole graph when nothing
-  // is selected. Each node keeps its exact source, so the result pastes cleanly.
   const copy = async () => {
-    let text = source;
-    if (selection.size > 0) {
-      text = graph.nodes
-        .filter((n) => selection.has(n.name))
-        .map((n) => n.raw)
-        .join("\n");
-    }
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(copyText());
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -551,6 +657,15 @@ export function UnrealGraph({ source }: { source: string }) {
           if (e.key === "f" || e.key === "F") {
             e.preventDefault();
             fit();
+          } else if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+            // Ctrl/Cmd+C copies the selected nodes (or all) back for Unreal.
+            e.preventDefault();
+            void copy();
+          } else if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+            e.preventDefault();
+            setSelection(new Set(graph.nodes.map((n) => n.name)));
+          } else if (e.key === "Escape") {
+            setSelection(new Set());
           }
         }}
         // The dot grid rides the pan/zoom so movement is visible: its size scales
@@ -594,7 +709,7 @@ export function UnrealGraph({ source }: { source: string }) {
               key={p.node.name}
               p={p}
               selected={selection.has(p.node.name)}
-              onSelect={toggleSelect}
+              onNodeDown={onNodeDown}
             />
           ))}
           {marquee && (
@@ -609,7 +724,7 @@ export function UnrealGraph({ source }: { source: string }) {
             />
           )}
         </div>
-        <div className="ue-graph-hint">Scroll to zoom · right-drag to pan · drag to select · F or double-click to fit</div>
+        <div className="ue-graph-hint">Drag a node to move · right-drag to pan · scroll to zoom · drag empty space to select · Ctrl+C to copy · F to fit</div>
       </div>
     </div>
   );
