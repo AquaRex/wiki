@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useRevalidator } from "react-router";
-import { Eye, EyeOff, FolderOpen, GripVertical, Lock, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, GripVertical, Lock, LogOut, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { Route } from "./+types/wiki";
 import {
@@ -93,7 +93,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 /* ------------------------------------------------------------------ */
 
 function Landing({ projects }: { projects: ProjectCard[] }) {
-  const { editUnlocked, signedIn, editMode, setEditMode } = useAuth();
+  const { editUnlocked, signedIn, editMode, setEditMode, signOut } = useAuth();
   const { resolvedTheme, setTheme } = useTheme();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
@@ -176,16 +176,28 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
               <Moon className="hidden size-4 dark:block" />
             </Button>
             {signedIn ? (
-              <Button
-                variant={editMode ? "default" : "outline"}
-                size="sm"
-                onClick={() => setEditMode(!editMode)}
-                className="gap-1.5 font-mono text-[11px] uppercase tracking-wider"
-                title={editMode ? "Switch to preview (read-only)" : "Turn editing on"}
-              >
-                {editMode ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
-                {editMode ? "Preview" : "Edit"}
-              </Button>
+              <>
+                <Button
+                  variant={editMode ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setEditMode(!editMode)}
+                  className="gap-1.5 font-mono text-[11px] uppercase tracking-wider"
+                  title={editMode ? "Switch to preview (read-only)" : "Turn editing on"}
+                >
+                  {editMode ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
+                  {editMode ? "Preview" : "Edit"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => signOut()}
+                  title="Sign out"
+                  aria-label="Sign out"
+                  className="text-text-faint hover:text-foreground"
+                >
+                  <LogOut className="size-4" />
+                </Button>
+              </>
             ) : (
               <Button
                 variant="ghost"
