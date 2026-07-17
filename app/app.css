@@ -178,6 +178,8 @@
 .wiki p {
   max-width: var(--measure);
   margin: 14px 0;
+  /* A line break the author typed is a line break they meant. */
+  white-space: pre-line;
 }
 .wiki a.ext,
 .wiki a.wikilink {
@@ -261,14 +263,35 @@
   margin: 30px 0 4px;
   letter-spacing: -0.005em;
   scroll-margin-top: 80px;
+  /* Flex so a trailing heading image can be pushed to the right edge. */
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  max-width: var(--measure);
 }
+/*
+ * "^ text" — muted subtext. Directly under a heading it reads as an eyebrow;
+ * anywhere else (under an image, inside a callout) it reads as a caption. Same
+ * styling in both places, matching figcaption so the page stays consistent.
+ */
 .wiki .kicker {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--text-faint);
-  text-transform: uppercase;
   margin: 0 0 22px;
+}
+/* Under a heading it keeps the original uppercase eyebrow treatment. */
+.wiki :is(.wk-h2, .wk-h3) + .kicker {
+  font-size: 12.5px;
+  text-transform: uppercase;
+}
+/* Under an image or inside a box it sits tight to what it describes. */
+.wiki .wk-img + .kicker,
+.wiki .callout-body .kicker,
+.wiki .note .kicker,
+.wiki .callout .kicker {
+  margin: 4px 0 12px;
 }
 
 .wiki .code {
@@ -371,9 +394,30 @@
   font-family: var(--font-mono);
   line-height: 1.5;
 }
+/*
+ * The body renders through the full block renderer, so it can contain
+ * dividers, images, lists and nested callouts. Collapse the outer margins so a
+ * box holding one paragraph still looks like a single tight row.
+ */
+.wiki .callout-box .callout-body {
+  min-width: 0;
+  flex: 1;
+}
+.wiki .callout-box .callout-body > :first-child {
+  margin-top: 0;
+}
+.wiki .callout-box .callout-body > :last-child {
+  margin-bottom: 0;
+}
 .wiki .callout-box p {
-  margin: 0;
   font-size: 15px;
+}
+.wiki .callout-box .wk-img {
+  margin: 12px 0;
+}
+/* A nested box indents inside its parent rather than spanning the full width. */
+.wiki .callout-box .callout-box {
+  margin: 12px 0 0;
 }
 .wiki .callout-box.warn {
   background: var(--warn-bg);
@@ -513,6 +557,28 @@
   color: var(--text-faint);
   font-size: 18px;
   flex: none;
+}
+
+/*
+ * An image trailing a heading ("## Title ![](x.png)") sits at the right end of
+ * the heading row, its bottom aligned with the heading's — an icon or a visual
+ * gloss on what the section covers.
+ */
+.wiki .wk-h-img {
+  margin-left: auto;
+  align-self: flex-end;
+  max-height: 2.1em;
+  width: auto;
+  flex: none;
+  border-radius: 6px;
+  display: block;
+}
+.wiki .wk-h3 .wk-h-img {
+  max-height: 1.7em;
+}
+
+.wiki .wk-inline-img {
+  max-width: 100%;
 }
 
 .wiki .wk-img {

@@ -21,32 +21,38 @@ export interface RenderContext {
 }
 
 /**
+ * Resolved image URLs, kept across renders. Without this the live preview
+ * re-resolves every image on each keystroke, which blanks the images and makes
+ * the page jump under the cursor.
+ */
+const assetUrls = new Map<string, string>();
+
+/**
  * Renders an image whose URL has to be resolved asynchronously. Markdown
  * rendering is synchronous, so the resolution happens here rather than being
  * awaited up front.
+ *
+ * The effect deliberately depends on `src` alone: `ctx` is rebuilt on every
+ * render by its caller, so depending on it would re-run this constantly.
  */
-function Asset({
-  ctx,
-  src,
-  alt,
-  style,
-}: {
-  ctx: RenderContext;
-  src: string;
-  alt: string;
-  style?: React.CSSProperties;
-}) {
-  const [resolved, setResolved] = useState<string | null>(null);
+function Asset({ ctx, src, alt, className }: { ctx: RenderContext; src: string; alt: string; className?: string }) {
+  const resolver = ctx.resolveAsset;
+  const [resolved, setResolved] = useState<string | null>(() => assetUrls.get(src) ?? null);
 
   useEffect(() => {
-    let cancelled = false;
-    if (!ctx.resolveAsset) {
+    const cached = assetUrls.get(src);
+    if (cached) {
+      setResolved(cached);
+      return;
+    }
+    if (!resolver) {
       setResolved(src);
       return;
     }
-    ctx
-      .resolveAsset(src)
+    let cancelled = false;
+    resolver(src)
       .then((url) => {
+        assetUrls.set(src, url);
         if (!cancelled) {
           setResolved(url);
         }
@@ -59,12 +65,14 @@ function Asset({
     return () => {
       cancelled = true;
     };
-  }, [ctx, src]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src]);
 
   if (!resolved) {
-    return <span className="inline-block h-4 w-4 animate-pulse rounded bg-surface-2" aria-hidden />;
+    // Reserve space so the layout doesn't collapse while the URL resolves.
+    return <span className={className} style={{ display: "block", minHeight: 24 }} aria-hidden />;
   }
-  return <img src={resolved} alt={alt} style={style} />;
+  return <img className={className} src={resolved} alt={alt} />;
 }
 
 let keyCounter = 0;
@@ -285,7 +293,7 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
       );
     } else if (m[6]) {
       const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(token)!;
-      out.push(<Asset key={k()} ctx={ctx} src={im[2]} alt={im[1]} style={{ maxWidth: "100%" }} />);
+      out.push(<Asset key={k()} ctx={ctx} src={im[2]} alt={im[1]} className="wk-inline-img" />);
     } else if (m[7]) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!;
       out.push(
@@ -322,6 +330,40 @@ interface DirectiveLines {
   lines: string[];
 }
 
+/**
+ * Splits a trailing image off a heading line, so `## Title ![](/x.png)` can
+ * render the image to the right of the title rather than inline in the text.
+ */
+function splitHeadingImage(text: string): { text: string; image: { src: string; alt: string } | null } {
+  const match = /^(.*?)\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(text);
+  if (!match) {
+    return { text, image: null };
+  }
+  return { text: match[1].trim(), image: { alt: match[2], src: match[3] } };
+}
+
+function Heading({
+  level,
+  text,
+  ctx,
+  num,
+}: {
+  level: 2 | 3 | 4;
+  text: string;
+  ctx: RenderContext;
+  num?: number;
+}) {
+  const { text: label, image } = splitHeadingImage(text);
+  const Tag = (level === 4 ? "h4" : level === 3 ? "h3" : "h2") as React.ElementType;
+  return (
+    <Tag className={level === 2 ? "wk-h2" : "wk-h3"} id={slugify(label)}>
+      {num !== undefined && <span className="num">{String(num).padStart(2, "0")}</span>}
+      <span>{renderInline(label, ctx)}</span>
+      {image && <Asset ctx={ctx} src={image.src} alt={image.alt} className="wk-h-img" />}
+    </Tag>
+  );
+}
+
 const CALLOUT_ICONS: Record<string, string> = {
   error: "✕",
   warn: "!",
@@ -338,13 +380,7 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
       return (
         <div key={k()} className={cls}>
           {dir.param && <p className="label">{dir.param}</p>}
-          {body
-            .join("\n")
-            .split(/\n{2,}/)
-            .filter((s) => s.trim())
-            .map((para) => (
-              <p key={k()}>{renderInline(para.replace(/\n/g, " "), ctx)}</p>
-            ))}
+          {renderMarkdown(body.join("\n"), ctx)}
         </div>
       );
     }
@@ -355,11 +391,13 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
     case "tips": {
       // "pitfall" is the old name for "error" — kept so existing pages render.
       const kind = dir.type === "pitfall" ? "error" : dir.type;
+      // The body goes through the block renderer so dividers, captions,
+      // headings and nested callouts work the same inside a box as outside.
       const text = [dir.param, ...body].filter(Boolean).join("\n");
       return (
         <div key={k()} className={`callout-box ${kind === "error" ? "" : kind}`.trim()}>
           <span className="icon">{CALLOUT_ICONS[kind]}</span>
-          <p>{renderInline(text.replace(/\n/g, " "), ctx)}</p>
+          <div className="callout-body">{renderMarkdown(text, ctx)}</div>
         </div>
       );
     }
@@ -537,50 +575,53 @@ export function renderMarkdown(text: string, ctx: RenderContext, h2Start = 0): R
       const headMatch = /^:::\s*([a-zA-Z]+)\s*(.*)$/.exec(line);
       const dirLines: string[] = [];
       i++;
-      while (i < lines.length && lines[i].trim() !== ":::") {
-        dirLines.push(lines[i]);
+      // Track nesting so an inner ::: block doesn't close the outer one.
+      let depth = 1;
+      while (i < lines.length) {
+        const current = lines[i];
+        if (current.trim() === ":::") {
+          depth--;
+          if (depth === 0) {
+            break;
+          }
+        } else if (/^:::\s*[a-zA-Z]+/.test(current.trim())) {
+          depth++;
+        }
+        dirLines.push(current);
         i++;
       }
       i++;
-      out.push(renderDirective({ type: headMatch ? headMatch[1].toLowerCase() : "note", param: headMatch ? headMatch[2].trim() : "", lines: dirLines }, ctx));
+      out.push(
+        renderDirective(
+          {
+            type: headMatch ? headMatch[1].toLowerCase() : "note",
+            param: headMatch ? headMatch[2].trim() : "",
+            lines: dirLines,
+          },
+          ctx
+        )
+      );
       continue;
     }
 
     if (line.startsWith("#### ")) {
-      out.push(
-        <h4 key={k()} className="wk-h3" id={slugify(line.slice(5))}>
-          {renderInline(line.slice(5), ctx)}
-        </h4>
-      );
+      out.push(<Heading key={k()} level={4} text={line.slice(5)} ctx={ctx} />);
       i++;
       continue;
     }
     if (line.startsWith("### ")) {
-      out.push(
-        <h3 key={k()} className="wk-h3" id={slugify(line.slice(4))}>
-          {renderInline(line.slice(4), ctx)}
-        </h3>
-      );
+      out.push(<Heading key={k()} level={3} text={line.slice(4)} ctx={ctx} />);
       i++;
       continue;
     }
     if (line.startsWith("## ")) {
       h2Index++;
-      out.push(
-        <h2 key={k()} className="wk-h2" id={slugify(line.slice(3))}>
-          <span className="num">{String(h2Index).padStart(2, "0")}</span>
-          <span>{renderInline(line.slice(3), ctx)}</span>
-        </h2>
-      );
+      out.push(<Heading key={k()} level={2} text={line.slice(3)} ctx={ctx} num={h2Index} />);
       i++;
       continue;
     }
     if (line.startsWith("# ")) {
-      out.push(
-        <h2 key={k()} className="wk-h2" id={slugify(line.slice(2))}>
-          {renderInline(line.slice(2), ctx)}
-        </h2>
-      );
+      out.push(<Heading key={k()} level={2} text={line.slice(2)} ctx={ctx} />);
       i++;
       continue;
     }
@@ -675,7 +716,9 @@ export function renderMarkdown(text: string, ctx: RenderContext, h2Start = 0): R
       paraLines.push(lines[i]);
       i++;
     }
-    out.push(<p key={k()}>{renderInline(paraLines.join(" "), ctx)}</p>);
+    // Joined with newlines, not spaces: a line break the author typed is a line
+    // break they meant. `.wiki p` preserves them via white-space: pre-line.
+    out.push(<p key={k()}>{renderInline(paraLines.join("\n"), ctx)}</p>);
   }
 
   return <>{out}</>;
