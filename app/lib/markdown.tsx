@@ -39,15 +39,23 @@ const assetUrls = new Map<string, string>();
 function Asset({ ctx, src, alt, className }: { ctx: RenderContext; src: string; alt: string; className?: string }) {
   const resolver = ctx.resolveAsset;
   const [resolved, setResolved] = useState<string | null>(() => assetUrls.get(src) ?? null);
+  // "pending" while resolving, "failed" once the URL can't resolve or the image
+  // itself won't load — at which point a labelled placeholder box stands in.
+  const [status, setStatus] = useState<"pending" | "ok" | "failed">(() =>
+    assetUrls.get(src) ? "ok" : "pending"
+  );
 
   useEffect(() => {
     const cached = assetUrls.get(src);
     if (cached) {
       setResolved(cached);
+      setStatus("ok");
       return;
     }
+    setStatus("pending");
     if (!resolver) {
       setResolved(src);
+      setStatus("ok");
       return;
     }
     let cancelled = false;
@@ -56,11 +64,13 @@ function Asset({ ctx, src, alt, className }: { ctx: RenderContext; src: string; 
         assetUrls.set(src, url);
         if (!cancelled) {
           setResolved(url);
+          setStatus("ok");
         }
       })
       .catch(() => {
         if (!cancelled) {
           setResolved(null);
+          setStatus("failed");
         }
       });
     return () => {
@@ -69,11 +79,26 @@ function Asset({ ctx, src, alt, className }: { ctx: RenderContext; src: string; 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
+  // A missing image renders a placeholder box rather than a broken icon, so both
+  // documentation examples and pages with a deleted upload show something clear.
+  if (status === "failed" || (status === "ok" && !resolved)) {
+    return (
+      <span className={`wk-img-placeholder ${className ?? ""}`.trim()} role="img" aria-label={alt || "image"}>
+        <span className="wk-img-placeholder-icon" aria-hidden>
+          ▨
+        </span>
+        <span className="wk-img-placeholder-label">{alt || src}</span>
+      </span>
+    );
+  }
+
   if (!resolved) {
     // Reserve space so the layout doesn't collapse while the URL resolves.
     return <span className={className} style={{ display: "block", minHeight: 24 }} aria-hidden />;
   }
-  return <img className={className} src={resolved} alt={alt} />;
+  return (
+    <img className={className} src={resolved} alt={alt} onError={() => setStatus("failed")} />
+  );
 }
 
 /**
