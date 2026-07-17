@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRevalidator } from "react-router";
 import {
   ArrowDown,
@@ -9,8 +9,10 @@ import {
   ChevronDown,
   CircleCheck,
   CircleX,
+  Clipboard,
   Code,
   Code2,
+  Copy,
   GitBranch,
   Heading2,
   Heading3,
@@ -38,6 +40,21 @@ import { Button } from "~/components/ui/button";
 import { renderMarkdown, countH2, type RenderContext } from "~/lib/markdown";
 import { newBlockId, type WikiBlock, type WikiPage } from "~/lib/shared";
 import { getStore } from "~/lib/store";
+import { parseUeGraph } from "~/lib/ueGraph";
+
+/**
+ * A block that is nothing but a single :::blueprint / :::material directive is
+ * edited with a compact card instead of the giant textarea — its pasted text is
+ * thousands of characters and would otherwise make the block impossible to edit.
+ * Returns the directive type and the raw inner text, or null for ordinary blocks.
+ */
+function blueprintBlock(text: string): { type: "blueprint" | "material"; inner: string } | null {
+  const m = /^\s*:::(blueprint|material)\b[^\n]*\n([\s\S]*?)\n:::\s*$/.exec(text);
+  if (!m) {
+    return null;
+  }
+  return { type: m[1] as "blueprint" | "material", inner: m[2] };
+}
 
 interface Snippet {
   label: string;
@@ -147,6 +164,80 @@ function useMutatePage(pagePath: string) {
   };
 
   return { mutate, busy };
+}
+
+/**
+ * The one-line editor for a blueprint/material block: node/link counts, plus
+ * Copy (the raw text back out) and Paste (replace the graph from the clipboard).
+ * The full T3D never appears in a scrollable field.
+ */
+function BlueprintCard({
+  type,
+  inner,
+  onReplace,
+}: {
+  type: "blueprint" | "material";
+  inner: string;
+  onReplace: (inner: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const stats = useMemo(() => {
+    try {
+      const g = parseUeGraph(inner);
+      return { nodes: g.nodes.length, links: g.wires.length };
+    } catch {
+      return { nodes: 0, links: 0 };
+    }
+  }, [inner]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(inner);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — ignore */
+    }
+  };
+
+  const pasteNew = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) {
+        onReplace(text.replace(/\r\n/g, "\n").trim());
+      }
+    } catch {
+      alert("Couldn't read the clipboard. Copy the nodes from Unreal, then try again.");
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 border-b border-border bg-surface-2 px-3 py-2">
+      <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-waccent">
+        {type}
+      </span>
+      <span className="font-mono text-[11px] text-text-faint">
+        {stats.nodes} nodes · {stats.links} links · text hidden
+      </span>
+      <div className="ml-auto flex gap-1.5">
+        <button
+          type="button"
+          onClick={copy}
+          className="flex items-center gap-1 rounded border border-border px-2 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-dim hover:bg-surface hover:text-foreground"
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          {copied ? "Copied" : "Copy text"}
+        </button>
+        <button
+          type="button"
+          onClick={pasteNew}
+          className="flex items-center gap-1 rounded border border-border px-2 py-1 font-mono text-[10.5px] uppercase tracking-wide text-text-dim hover:bg-surface hover:text-foreground"
+        >
+          <Clipboard className="size-3.5" /> Paste new
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function BlockEditorPanel({
@@ -316,6 +407,38 @@ function BlockEditorPanel({
       onClose();
     }
   };
+
+  // A blueprint/material block is edited through a compact card, never the huge
+  // textarea — the graph text just needs to live somewhere, not be read.
+  const bp = blueprintBlock(draft);
+  if (bp) {
+    return (
+      <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
+        <div className="wiki border-b border-border px-5 pb-4 pt-1">
+          {renderMarkdown(draft, ctx, h2Start)}
+          <div className="clear-both" />
+        </div>
+        <BlueprintCard
+          type={bp.type}
+          inner={bp.inner}
+          onReplace={(nextInner) => setDraft(`:::${bp.type}\n${nextInner}\n:::`)}
+        />
+        <div className="flex items-center justify-between border-t border-border px-3 py-2">
+          <span className="font-mono text-[10.5px] uppercase tracking-wider text-text-faint">
+            Graph preview above · the pasted text is kept, not shown · Ctrl+Enter to save
+          </span>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="xs" onClick={onClose} disabled={busy}>
+              <X className="size-3" /> Cancel
+            </Button>
+            <Button size="xs" onClick={save} disabled={busy}>
+              <Check className="size-3" /> {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">

@@ -185,6 +185,23 @@ function place(
   return { placed, byName };
 }
 
+/** A pin's Y offset from the top of its node (for alignment maths). */
+function pinOffsetY(node: UeNode, pinId: string): number | null {
+  if (isPill(node)) {
+    return nodeHeight(node) / 2;
+  }
+  const rowY = (idx: number) => HEADER_H + PINS_TOP + idx * PIN_ROW_H + PIN_ROW_H / 2;
+  const inIdx = node.inputs.findIndex((pin) => pin.id === pinId);
+  if (inIdx !== -1) {
+    return rowY(inIdx);
+  }
+  const outIdx = node.outputs.findIndex((pin) => pin.id === pinId);
+  if (outIdx !== -1) {
+    return rowY(outIdx);
+  }
+  return null;
+}
+
 /** Anchor point (canvas coords) for a pin on a placed node. */
 function pinAnchor(p: Placed, pinId: string): { x: number; y: number; cat: string } | null {
   // A pill-rendered node (variable Get) has no pin rows — anchor at its middle.
@@ -614,6 +631,54 @@ function UnrealGraphInner({ source }: { source: string }) {
     }
   };
 
+  /*
+   * Q — straighten connections between selected nodes, like Unreal. For each wire
+   * whose both ends are selected, nudge the target node vertically so its input
+   * pin lines up with the source's output pin, making the wire horizontal.
+   * Wires are processed source-first (by X) so a chain settles left to right.
+   */
+  const straighten = () => {
+    if (selection.size < 2) {
+      return;
+    }
+    const pos = new Map<string, { x: number; y: number }>();
+    for (const p of placed) {
+      pos.set(p.node.name, { x: p.x, y: p.y });
+    }
+    const nodeByName = new Map(graph.nodes.map((n) => [n.name, n]));
+    const links = graph.wires
+      .filter((w) => selection.has(w.fromNode) && selection.has(w.toNode) && w.fromNode !== w.toNode)
+      .sort((a, b) => (pos.get(a.fromNode)!.x - pos.get(b.fromNode)!.x));
+
+    for (const w of links) {
+      const src = nodeByName.get(w.fromNode);
+      const dst = nodeByName.get(w.toNode);
+      const srcPos = pos.get(w.fromNode);
+      const dstPos = pos.get(w.toNode);
+      if (!src || !dst || !srcPos || !dstPos) {
+        continue;
+      }
+      const outOff = pinOffsetY(src, w.fromPin);
+      const inOff = pinOffsetY(dst, w.toPin);
+      if (outOff == null || inOff == null) {
+        continue;
+      }
+      // Move the target so its input pin shares the source output pin's Y.
+      dstPos.y = srcPos.y + outOff - inOff;
+    }
+
+    setMoved((prev) => {
+      const next = { ...prev };
+      for (const name of selection) {
+        const p = pos.get(name);
+        if (p) {
+          next[name] = { x: p.x, y: p.y };
+        }
+      }
+      return next;
+    });
+  };
+
   if (graph.nodes.length === 0) {
     return (
       <div className="ue-graph-empty">
@@ -657,6 +722,9 @@ function UnrealGraphInner({ source }: { source: string }) {
           if (e.key === "f" || e.key === "F") {
             e.preventDefault();
             fit();
+          } else if (e.key === "q" || e.key === "Q") {
+            e.preventDefault();
+            straighten();
           } else if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
             // Ctrl/Cmd+C copies the selected nodes (or all) back for Unreal.
             e.preventDefault();
@@ -724,7 +792,7 @@ function UnrealGraphInner({ source }: { source: string }) {
             />
           )}
         </div>
-        <div className="ue-graph-hint">Drag a node to move · right-drag to pan · scroll to zoom · drag empty space to select · Ctrl+C to copy · F to fit</div>
+        <div className="ue-graph-hint">Drag to move · right-drag to pan · scroll to zoom · Q to straighten · Ctrl+C to copy · F to fit</div>
       </div>
     </div>
   );
