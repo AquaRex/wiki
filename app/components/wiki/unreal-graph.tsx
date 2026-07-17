@@ -328,7 +328,7 @@ function NodeBox({
         width: p.w,
         minHeight: p.h,
         borderRadius: 6,
-        background: "#1a1f24",
+        background: "#161b23",
         border: `1px solid ${selected ? "#ffb300" : "#000"}`,
         boxShadow: selected ? "0 0 0 2px rgba(255,179,0,0.5)" : "0 3px 10px rgba(0,0,0,0.5)",
         overflow: "hidden",
@@ -336,20 +336,28 @@ function NodeBox({
         cursor: "move",
       }}
     >
+      {/* The type colour is a short accent line across the top, ~85% width, with
+          the title sitting on the node background directly below it. */}
       <div
         style={{
           height: HEADER_H,
-          background: headerColor(p.node),
-          color: "#fff",
           display: "flex",
-          alignItems: "center",
+          flexDirection: "column",
+          justifyContent: "center",
           padding: "0 10px",
-          fontSize: 12.5,
-          fontWeight: 600,
           whiteSpace: "nowrap",
         }}
       >
-        {p.node.title}
+        <div
+          style={{
+            width: "85%",
+            height: 3,
+            borderRadius: 2,
+            background: headerColor(p.node),
+            marginBottom: 4,
+          }}
+        />
+        <div style={{ color: "#fff", fontSize: 12.5, fontWeight: 600 }}>{p.node.title}</div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", padding: `${PINS_TOP}px 0` }}>
         <div>
