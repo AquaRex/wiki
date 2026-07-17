@@ -47,6 +47,12 @@ export interface WikiStore {
   getProjectAccess(): Promise<Record<string, AccessLevel>>;
   /** Sets a project's or page's access level. Locking also needs a password. */
   setAccess(scope: "project" | "page", key: string, level: AccessLevel): Promise<void>;
+  /**
+   * Applies an access level (and, when locking, a password) to every page inside
+   * a folder — folders aren't a lockable scope of their own, so this stamps each
+   * page individually. `folderRel` is the project-relative folder path.
+   */
+  setFolderAccess(project: string, folderRel: string, level: AccessLevel, password?: string): Promise<void>;
   /** Sets (or clears, with "") the lock password for a project or page. */
   setLockPassword(scope: "project" | "page", key: string, password: string): Promise<void>;
   /** The emails granted to see a hidden project/page. */
@@ -460,6 +466,29 @@ class SupabaseStore implements WikiStore {
         .eq("project_slug", project)
         .eq("rel", rel);
       fail("Could not change page access", error);
+    }
+    this.invalidate();
+  }
+
+  async setFolderAccess(project: string, folderRel: string, level: AccessLevel, password?: string) {
+    const prefix = folderRel ? folderRel.toLowerCase() + "/" : "";
+    const cache = await this.pages();
+    const targets = Array.from(cache.values()).filter((p) => {
+      const { project: proj, rel } = splitPath(p.path);
+      return proj.toLowerCase() === project.toLowerCase() && rel.toLowerCase().startsWith(prefix);
+    });
+
+    for (const page of targets) {
+      const { rel } = splitPath(page.path);
+      const { error } = await supabase
+        .from("pages")
+        .update({ access: level })
+        .eq("project_slug", project)
+        .eq("rel", rel);
+      fail(`Could not change access for ${page.path}`, error);
+      if (level === "locked" && password) {
+        await this.setLockPassword("page", `${project}/${rel}`, password);
+      }
     }
     this.invalidate();
   }

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRevalidator } from "react-router";
-import { ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, GripVertical, Lock, Pencil, Trash2 } from "lucide-react";
+import { Check, ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, Globe, GripVertical, Lock, Pencil, Trash2 } from "lucide-react";
 import { getStore } from "~/lib/store";
 import {
   lastSegment,
   normalizeSegment,
   parentOfRel,
   stripProjectPrefix,
+  type AccessLevel,
   type PageMove,
   type PageSummary,
   type ProjectMeta,
@@ -267,6 +268,9 @@ export function PageTree({
   const [over, setOver] = useState<OverState | null>(null);
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
+  // The access sub-panel shown inside the context menu: which level is pending,
+  // and a password when locking.
+  const [menuAccess, setMenuAccess] = useState<{ level: AccessLevel; password: string } | null>(null);
   const revalidator = useRevalidator();
   const navigate = useNavigate();
 
@@ -530,11 +534,56 @@ export function PageTree({
       return;
     }
     e.preventDefault();
-    setMenu({ node, x: e.clientX, y: e.clientY });
+    setMenuAccess(null);
+    // Keep the menu on screen — it's tall enough to clip near the bottom edge.
+    const MENU_W = 200;
+    const MENU_H = 260;
+    const x = Math.min(e.clientX, window.innerWidth - MENU_W - 8);
+    const y = Math.min(e.clientY, window.innerHeight - MENU_H - 8);
+    setMenu({ node, x: Math.max(8, x), y: Math.max(8, y) });
+  };
+
+  const closeMenu = () => {
+    setMenu(null);
+    setMenuAccess(null);
+  };
+
+  // Applies an access level to a page or, for a folder, to every page inside it.
+  const applyAccess = async (node: TreeNode, level: AccessLevel, password?: string) => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const store = getStore();
+      if (node.page && !isFolderNode(node)) {
+        await store.setAccess("page", node.page.path, level);
+        if (level === "locked" && password) {
+          await store.setLockPassword("page", node.page.path, password);
+        }
+      } else {
+        await store.setFolderAccess(project, node.rel, level, password);
+      }
+      revalidator.revalidate();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not change access.");
+    } finally {
+      setBusy(false);
+      closeMenu();
+    }
+  };
+
+  const chooseMenuAccess = (node: TreeNode, level: AccessLevel) => {
+    // Locking needs a password; open the inline field instead of applying now.
+    if (level === "locked") {
+      setMenuAccess({ level, password: "" });
+      return;
+    }
+    void applyAccess(node, level);
   };
 
   const menuRename = (node: TreeNode) => {
-    setMenu(null);
+    closeMenu();
     const next = prompt(`Rename "${node.name}" to:`, node.name);
     if (next !== null) {
       void renameNode(node, next);
@@ -542,7 +591,7 @@ export function PageTree({
   };
 
   const menuDelete = (node: TreeNode) => {
-    setMenu(null);
+    closeMenu();
     if (node.page && !isFolderNode(node)) {
       void deletePageNode(node);
     } else {
@@ -607,14 +656,14 @@ export function PageTree({
           {/* Backdrop closes the menu on any outside click or a second right-click. */}
           <div
             className="fixed inset-0 z-40"
-            onClick={() => setMenu(null)}
+            onClick={closeMenu}
             onContextMenu={(e) => {
               e.preventDefault();
-              setMenu(null);
+              closeMenu();
             }}
           />
           <div
-            className="fixed z-50 min-w-40 rounded-md border border-border bg-popover py-1 text-[13px] text-popover-foreground shadow-md"
+            className="fixed z-50 min-w-48 rounded-md border border-border bg-popover py-1 text-[13px] text-popover-foreground shadow-md"
             style={{ left: menu.x, top: menu.y }}
           >
             <button
@@ -631,6 +680,61 @@ export function PageTree({
             >
               <Trash2 className="size-3.5" /> Delete {menu.node.page && !isFolderNode(menu.node) ? "page" : "folder"}
             </button>
+
+            {/* Access — for a page, its own level; for a folder, applied to every
+                page inside it (folders aren't a lockable unit on their own). */}
+            <div className="my-1 border-t border-border" />
+            <div className="px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-text-faint">
+              {menu.node.page && !isFolderNode(menu.node) ? "Access" : "Access · all pages inside"}
+            </div>
+            {(() => {
+              const pageAccess = menu.node.page && !isFolderNode(menu.node) ? menu.node.page.access : null;
+              const rows: { level: AccessLevel; icon: React.ReactNode; label: string }[] = [
+                { level: "public", icon: <Globe className="size-3.5" />, label: "Public" },
+                { level: "locked", icon: <Lock className="size-3.5" />, label: "Locked" },
+                { level: "hidden", icon: <EyeOff className="size-3.5" />, label: "Hidden" },
+              ];
+              return rows.map((r) => (
+                <button
+                  key={r.level}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => chooseMenuAccess(menu.node, r.level)}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent-soft hover:text-waccent ${
+                    pageAccess === r.level ? "text-waccent" : ""
+                  }`}
+                >
+                  {r.icon} {r.label}
+                  {pageAccess === r.level && <Check className="ml-auto size-3.5" />}
+                </button>
+              ));
+            })()}
+
+            {menuAccess?.level === "locked" && (
+              <div className="grid gap-1.5 border-t border-border px-3 py-2">
+                <input
+                  type="password"
+                  autoFocus
+                  value={menuAccess.password}
+                  onChange={(e) => setMenuAccess({ level: "locked", password: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && menuAccess.password) {
+                      void applyAccess(menu.node, "locked", menuAccess.password);
+                    }
+                  }}
+                  placeholder="Access password"
+                  className="w-full rounded border border-border bg-surface px-2 py-1 font-mono text-[12px] outline-none focus:ring-1 focus:ring-accent-line"
+                />
+                <button
+                  type="button"
+                  disabled={busy || !menuAccess.password}
+                  onClick={() => void applyAccess(menu.node, "locked", menuAccess.password)}
+                  className="flex items-center justify-center gap-1 rounded bg-accent-soft px-2 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-wider text-waccent hover:bg-accent-line disabled:opacity-50"
+                >
+                  <Lock className="size-3" /> Lock it
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}
