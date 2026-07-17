@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ShieldCheck } from "lucide-react";
 import { Button } from "~/components/ui/button";
@@ -12,15 +12,28 @@ export function meta() {
   return [{ title: `Sign in · ${wikiConfig.siteName}` }];
 }
 
+const REMEMBERED_EMAIL_KEY = "wiki-remembered-email";
+
 export default function Admin() {
   const { signedIn, email: currentEmail, signIn, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const to = searchParams.get("to") || "/";
+
+  // Prefill the last-used email (never the password) so returning is one click.
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem(REMEMBERED_EMAIL_KEY) : null;
+    if (saved) {
+      setEmail(saved);
+    } else {
+      setRemember(false);
+    }
+  }, []);
 
   const submit = async () => {
     if (busy) {
@@ -33,6 +46,15 @@ export default function Admin() {
     if (message) {
       setError(message);
       return;
+    }
+    // Your session already persists across reloads; remembering the email means
+    // that even after a real sign-out you don't have to retype it.
+    if (typeof window !== "undefined") {
+      if (remember) {
+        window.localStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+      } else {
+        window.localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+      }
     }
     getStore().invalidate();
     navigate(to);
@@ -107,6 +129,15 @@ export default function Admin() {
                   className="font-mono"
                 />
               </div>
+              <label className="flex cursor-pointer select-none items-center gap-2 text-[12.5px] text-text-dim">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  className="size-3.5 accent-[var(--waccent)]"
+                />
+                Remember my email on this device
+              </label>
               {error && <p className="text-sm text-crit">{error}</p>}
               <Button onClick={submit} className="w-full" disabled={busy || !email || !password}>
                 {busy ? "Signing in…" : "Sign in"}

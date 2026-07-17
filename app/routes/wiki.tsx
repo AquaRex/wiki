@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useRevalidator } from "react-router";
-import { EyeOff, FolderOpen, GripVertical, Lock, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, GripVertical, Lock, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { Route } from "./+types/wiki";
 import {
@@ -93,7 +93,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
 /* ------------------------------------------------------------------ */
 
 function Landing({ projects }: { projects: ProjectCard[] }) {
-  const { editUnlocked } = useAuth();
+  const { editUnlocked, signedIn, editMode, setEditMode } = useAuth();
   const { resolvedTheme, setTheme } = useTheme();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
@@ -175,14 +175,27 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
               <Sun className="size-4 dark:hidden" />
               <Moon className="hidden size-4 dark:block" />
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              render={<Link to="/admin?to=/" />}
-              className="gap-1.5 font-mono text-[11px] uppercase tracking-wider text-text-faint"
-            >
-              <Pencil className="size-3.5" /> Admin
-            </Button>
+            {signedIn ? (
+              <Button
+                variant={editMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => setEditMode(!editMode)}
+                className="gap-1.5 font-mono text-[11px] uppercase tracking-wider"
+                title={editMode ? "Switch to preview (read-only)" : "Turn editing on"}
+              >
+                {editMode ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
+                {editMode ? "Preview" : "Edit"}
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                render={<Link to="/admin?to=/" />}
+                className="gap-1.5 font-mono text-[11px] uppercase tracking-wider text-text-faint"
+              >
+                <Pencil className="size-3.5" /> Admin
+              </Button>
+            )}
           </div>
         </div>
       </header>

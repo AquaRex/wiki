@@ -458,6 +458,17 @@ class SupabaseStore implements WikiStore {
     if (scope === "project") {
       const { error } = await supabase.from("projects").update({ access: level }).eq("slug", key);
       fail("Could not change project access", error);
+      // Making a project public must actually open it: pages can carry their own
+      // access (e.g. stamped 'hidden' by the launch migration), which overrides
+      // the project. Clear those so "public project" means public.
+      if (level === "public") {
+        const { error: pagesError } = await supabase
+          .from("pages")
+          .update({ access: "public" })
+          .eq("project_slug", key)
+          .neq("access", "public");
+        fail("Could not open the project's pages", pagesError);
+      }
     } else {
       const { project, rel } = splitPath(key);
       const { error } = await supabase
