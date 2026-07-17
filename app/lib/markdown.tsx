@@ -42,14 +42,14 @@ function Asset({
   src,
   alt,
   className,
-  width,
+  size,
 }: {
   ctx: RenderContext;
   src: string;
   alt: string;
   className?: string;
-  /** Optional display width in px, from a {w=…} suffix. */
-  width?: number | null;
+  /** Optional display size in px, from a {w=…, h=…} suffix. */
+  size?: ImageSize;
 }) {
   const resolver = ctx.resolveAsset;
   const [resolved, setResolved] = useState<string | null>(() => assetUrls.get(src) ?? null);
@@ -110,12 +110,22 @@ function Asset({
     // Reserve space so the layout doesn't collapse while the URL resolves.
     return <span className={className} style={{ display: "block", minHeight: 24 }} aria-hidden />;
   }
+  // A pinned width/height sets that dimension; the other stays `auto` so the
+  // aspect ratio is kept when only one is given. maxWidth keeps it responsive.
+  const style: React.CSSProperties = { cursor: "zoom-in" };
+  if (size?.width != null) {
+    style.width = size.width;
+    style.maxWidth = "100%";
+  }
+  if (size?.height != null) {
+    style.height = size.height;
+  }
   return (
     <img
       className={`${className ?? ""} wk-img-zoomable`.trim()}
       src={resolved}
       alt={alt}
-      style={width ? { width, maxWidth: "100%", cursor: "zoom-in" } : { cursor: "zoom-in" }}
+      style={style}
       onError={() => setStatus("failed")}
       onClick={() => openLightbox(resolved, alt)}
     />
@@ -256,18 +266,28 @@ function alignClasses(align: ImageAlign): string {
   return `h-${align.h} v-${align.v}`;
 }
 
+export interface ImageSize {
+  width: number | null;
+  height: number | null;
+}
+
+const EMPTY_SIZE: ImageSize = { width: null, height: null };
+
 /**
  * Reads an optional size suffix written after the image, e.g.
- *   ![cap](/x.png){w=300}
- * Accepts `w` or `width`. Returns the width in pixels, or null when absent.
- * Since we click to view an image full size, a smaller inline width is fine.
+ *   ![cap](/x.png){w=300}          — width only (height keeps the aspect ratio)
+ *   ![cap](/x.png){h=200}          — height only (width keeps the aspect ratio)
+ *   ![cap](/x.png){w=300, h=200}   — both, exact box (order doesn't matter)
+ * Accepts `w`/`width` and `h`/`height`, pixels. Since we click to view an image
+ * full size, a smaller inline size is fine.
  */
-function parseImageSize(suffix: string | undefined): number | null {
+function parseImageSize(suffix: string | undefined): ImageSize {
   if (!suffix) {
-    return null;
+    return EMPTY_SIZE;
   }
-  const m = /\{\s*(?:w|width)\s*=\s*(\d{1,4})\s*(?:px)?\s*\}/i.exec(suffix);
-  return m ? Number(m[1]) : null;
+  const w = /\b(?:w|width)\s*=\s*(\d{1,4})\s*(?:px)?/i.exec(suffix);
+  const h = /\b(?:h|height)\s*=\s*(\d{1,4})\s*(?:px)?/i.exec(suffix);
+  return { width: w ? Number(w[1]) : null, height: h ? Number(h[1]) : null };
 }
 
 /** Splits an image token into its `![…](…)` part and any trailing `{…}` suffix. */
@@ -283,7 +303,7 @@ interface RowImage {
   src: string;
   caption: string;
   align: ImageAlign;
-  width: number | null;
+  size: ImageSize;
 }
 
 /**
@@ -307,7 +327,7 @@ function parseImageRow(line: string): RowImage[] | null {
       return null;
     }
     const { src, align } = splitImageAlign(m[2]);
-    images.push({ src, caption: m[1], align, width: parseImageSize(m[3]) });
+    images.push({ src, caption: m[1], align, size: parseImageSize(m[3]) });
     last = m.index + m[0].length;
   }
   if (line.slice(last).trim() !== "") {
@@ -555,7 +575,7 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
       const { src: imgSrc, align } = splitImageAlign(im[2]);
       const inlineClass = `wk-inline-img ${alignClasses(align)}`;
       out.push(
-        <Asset key={k()} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} width={parseImageSize(suffix)} />
+        <Asset key={k()} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} size={parseImageSize(suffix)} />
       );
     } else if (m[7]) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!;
@@ -607,13 +627,15 @@ interface DirectiveLines {
  */
 function splitHeadingImage(text: string): {
   text: string;
-  image: { src: string; alt: string; width: number | null } | null;
+  image: { src: string; alt: string } | null;
 } {
-  const match = /^(.*?)\s*!\[([^\]]*)\]\(([^)]+)\)(\{[^}]*\})?\s*$/.exec(text);
+  // A trailing {…} size is tolerated but ignored — heading images are height-
+  // constrained icons.
+  const match = /^(.*?)\s*!\[([^\]]*)\]\(([^)]+)\)(?:\{[^}]*\})?\s*$/.exec(text);
   if (!match) {
     return { text, image: null };
   }
-  return { text: match[1].trim(), image: { alt: match[2], src: match[3], width: parseImageSize(match[4]) } };
+  return { text: match[1].trim(), image: { alt: match[2], src: match[3] } };
 }
 
 function Heading({
@@ -1072,8 +1094,8 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
         const im = rowImages[0];
         const figClass = `wk-img ${alignClasses(im.align)}`;
         out.push(
-          <figure key={bk("img", im.src)} className={figClass} style={im.width ? { maxWidth: im.width } : undefined}>
-            <Asset ctx={ctx} src={im.src} alt={plainCaption(im.caption)} width={im.width} />
+          <figure key={bk("img", im.src)} className={figClass} style={im.size.width != null ? { maxWidth: im.size.width } : undefined}>
+            <Asset ctx={ctx} src={im.src} alt={plainCaption(im.caption)} size={im.size} />
             {im.caption && <figcaption>{renderInline(im.caption, ctx)}</figcaption>}
           </figure>
         );
@@ -1083,8 +1105,8 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
         out.push(
           <div key={bk("imgrow", line.trim())} className={`wk-img-row row-${rowAlign}`}>
             {rowImages.map((im, idx) => (
-              <figure key={idx} className="wk-img" style={im.width ? { maxWidth: im.width } : undefined}>
-                <Asset ctx={ctx} src={im.src} alt={plainCaption(im.caption)} width={im.width} />
+              <figure key={idx} className="wk-img" style={im.size.width != null ? { maxWidth: im.size.width } : undefined}>
+                <Asset ctx={ctx} src={im.src} alt={plainCaption(im.caption)} size={im.size} />
                 {im.caption && <figcaption>{renderInline(im.caption, ctx)}</figcaption>}
               </figure>
             ))}
