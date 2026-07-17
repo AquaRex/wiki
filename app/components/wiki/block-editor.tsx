@@ -18,8 +18,11 @@ import {
   Info,
   Italic,
   Link2,
+  List,
   ListOrdered,
+  Megaphone,
   MessageSquareWarning,
+  Minus,
   PanelRight,
   Pencil,
   Plus,
@@ -56,31 +59,48 @@ const SNIPPETS: Snippet[] = [
   { label: "Code", icon: <Code className="size-3.5" />, text: "`code`", wrap: ["`", "`"], core: true },
   { label: "Term", icon: <Sigma className="size-3.5" />, text: "==highlighted term==", wrap: ["==", "=="], core: true },
   { label: "Subtext", icon: <Baseline className="size-3.5" />, text: "^ subtext", block: true, core: true },
-  { label: "Error", icon: <CircleX className="size-3.5" />, text: ":error text", wrap: [":error ", ""] },
-  { label: "Warn", icon: <TriangleAlert className="size-3.5" />, text: ":warn text", wrap: [":warn ", ""] },
-  { label: "Good", icon: <CircleCheck className="size-3.5" />, text: ":good text", wrap: [":good ", ""] },
-  { label: "Tip", icon: <Info className="size-3.5" />, text: ":tips text", wrap: [":tips ", ""] },
-  { label: "Muted", icon: <Baseline className="size-3.5" />, text: ":muted text", wrap: [":muted ", ""] },
   { label: "Wiki link", icon: <Link2 className="size-3.5" />, text: "[[Enemies/Example|label]]", wrap: ["[[", "]]"], core: true },
+
+  // --- inline tones: ":tone text" colours the words only
+  { label: ":Error", icon: <CircleX className="size-3.5" />, text: ":error text", wrap: [":error ", ""] },
+  { label: ":Warn", icon: <TriangleAlert className="size-3.5" />, text: ":warn text", wrap: [":warn ", ""] },
+  { label: ":Good", icon: <CircleCheck className="size-3.5" />, text: ":good text", wrap: [":good ", ""] },
+  { label: ":Tip", icon: <Info className="size-3.5" />, text: ":tips text", wrap: [":tips ", ""] },
+  { label: ":Muted", icon: <Baseline className="size-3.5" />, text: ":muted text", wrap: [":muted ", ""] },
+
+  // --- structure
+  { label: "Divider", icon: <Minus className="size-3.5" />, text: "---", block: true },
+  { label: "Quote line", icon: <Quote className="size-3.5" />, text: "> Quoted line", block: true, wrap: ["> ", ""] },
+  { label: "Bullets", icon: <List className="size-3.5" />, text: "- First item\n- Second item", block: true },
+  { label: "Numbered", icon: <ListOrdered className="size-3.5" />, text: "1. First step\n2. Second step", block: true },
   { label: "Link", icon: <Link2 className="size-3.5" />, text: "[label](https://example.com)", wrap: ["[", "](https://example.com)"] },
+  { label: "Head image", icon: <ImageIcon className="size-3.5" />, text: "## Section title ![](/uploads/icon.png)", block: true },
   { label: "Var def", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What this variable controls}}" },
+  { label: "Private var", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What it controls|private}}" },
   { label: "Var ref", icon: <Braces className="size-3.5" />, text: "{{varName|shown text}}" },
   { label: "Value", icon: <Braces className="size-3.5" />, text: "{{0.57|why this value}}" },
-  { label: "Code", icon: <Code2 className="size-3.5" />, text: "```csharp:EnemyAI.cs\n// code here\n```", block: true },
+  { label: "Code block", icon: <Code2 className="size-3.5" />, text: "```csharp:EnemyAI.cs\n// code here\n```", block: true },
   {
     label: "Table",
     icon: <Table2 className="size-3.5" />,
     text: "| Column | Column |\n| --- | --- |\n| Cell | Cell |",
     block: true,
   },
-  { label: "Callout", icon: <Info className="size-3.5" />, text: ":::callout The core idea\nThe headline statement.\n\nSupporting detail.\n:::", block: true },
+  // --- line tones: "::tone … ::" puts a coloured rule beside the text
+  { label: "::Error", icon: <CircleX className="size-3.5" />, text: "::error\nSomething that went wrong.\n::", block: true, wrap: ["::error\n", "\n::"] },
+  { label: "::Warn", icon: <TriangleAlert className="size-3.5" />, text: "::warn\nSomething to be careful about.\n::", block: true, wrap: ["::warn\n", "\n::"] },
+  { label: "::Good", icon: <CircleCheck className="size-3.5" />, text: "::good\nConfirmed-safe advice.\n::", block: true, wrap: ["::good\n", "\n::"] },
+  { label: "::Tips", icon: <Info className="size-3.5" />, text: "::tips\nSomething helpful.\n::", block: true, wrap: ["::tips\n", "\n::"] },
+  { label: "::Muted", icon: <Baseline className="size-3.5" />, text: "::muted\nA quiet aside.\n::", block: true, wrap: ["::muted\n", "\n::"] },
+
+  // --- boxes: ":::type … :::"
+  { label: "Callout", icon: <Megaphone className="size-3.5" />, text: ":::callout The core idea\nThe headline statement.\n\nSupporting detail.\n:::", block: true, wrap: [":::callout The core idea\n", "\n:::"] },
   { label: "Quote box", icon: <Quote className="size-3.5" />, text: ":::quote\nDisplayed text or a diagram — **formatting** works and it wraps.\n:::", block: true, wrap: [":::quote\n", "\n:::"] },
   { label: "Note", icon: <MessageSquareWarning className="size-3.5" />, text: ":::note Worth knowing\nA side remark.\n:::", block: true, wrap: [":::note\n", "\n:::"] },
-  { label: "Tips box", icon: <Info className="size-3.5" />, text: ":::tips\n**The tip.** Something helpful that isn't obvious.\n:::", block: true, wrap: [":::tips\n", "\n:::"] },
-  { label: "Error box", icon: <TriangleAlert className="size-3.5" />, text: ":::error\n**The mistake.** Why it goes wrong and what to do instead.\n:::", block: true, wrap: [":::error\n", "\n:::"] },
-  { label: "Error line", icon: <CircleX className="size-3.5" />, text: "::error\nSomething that went wrong.\n::", block: true, wrap: ["::error\n", "\n::"] },
-  { label: "Warn line", icon: <TriangleAlert className="size-3.5" />, text: "::warn\nSomething to be careful about.\n::", block: true, wrap: ["::warn\n", "\n::"] },
-  { label: "Tips line", icon: <Info className="size-3.5" />, text: "::tips\nSomething helpful.\n::", block: true, wrap: ["::tips\n", "\n::"] },
+  { label: ":::Error", icon: <CircleX className="size-3.5" />, text: ":::error\n**The mistake.** Why it goes wrong and what to do instead.\n:::", block: true, wrap: [":::error\n", "\n:::"] },
+  { label: ":::Warn", icon: <TriangleAlert className="size-3.5" />, text: ":::warn\n**The risk.** What to watch out for.\n:::", block: true, wrap: [":::warn\n", "\n:::"] },
+  { label: ":::Good", icon: <CircleCheck className="size-3.5" />, text: ":::good\n**The right way.** Confirmed-safe advice.\n:::", block: true, wrap: [":::good\n", "\n:::"] },
+  { label: ":::Tips", icon: <Info className="size-3.5" />, text: ":::tips\n**The tip.** Something helpful that isn't obvious.\n:::", block: true, wrap: [":::tips\n", "\n:::"] },
   {
     label: "Infobox",
     icon: <PanelRight className="size-3.5" />,
@@ -244,7 +264,20 @@ function BlockEditorPanel({
       selectTo += lead.length;
     }
 
-    setDraft(before + text + after);
+    /*
+     * Written through execCommand rather than setDraft so the browser records
+     * it on the textarea's native undo stack — Ctrl+Z then steps back through
+     * toolbar insertions exactly like typed text. Setting value directly would
+     * wipe that history. execCommand is deprecated but remains the only way to
+     * write to a field undoably; if it's unavailable we fall back to setDraft
+     * and lose only the undo entry.
+     */
+    el.focus();
+    el.setSelectionRange(start, end);
+    const inserted = document.execCommand?.("insertText", false, text);
+    if (!inserted) {
+      setDraft(before + text + after);
+    }
     requestAnimationFrame(() => {
       el.focus();
       el.setSelectionRange(selectFrom, selectTo);

@@ -26,6 +26,7 @@ export function EditableText({
   multiline = false,
   as: Tag = "div",
   markdown,
+  renderAs,
 }: {
   value: string;
   field: string;
@@ -37,6 +38,8 @@ export function EditableText({
   as?: React.ElementType;
   /** Render the value as markdown when not editing, instead of plain text. */
   markdown?: RenderContext;
+  /** Custom display for the value when not editing — e.g. tags as chips. */
+  renderAs?: (value: string) => React.ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -67,7 +70,11 @@ export function EditableText({
     }
   };
 
-  const rendered = markdown ? <div className="wiki">{renderMarkdown(value, markdown)}</div> : value;
+  const rendered = renderAs
+    ? renderAs(value)
+    : markdown
+      ? <div className="wiki">{renderMarkdown(value, markdown)}</div>
+      : value;
 
   if (!editUnlocked) {
     if (!value) {

@@ -509,26 +509,29 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
                 markdown={renderCtx}
               />
               <div className="mt-6">
-                {editUnlocked ? (
-                  <EditableText
-                    value={page.tags.join(", ")}
-                    field="tags"
-                    pagePath={page.path}
-                    editUnlocked
-                    className="font-mono text-[12.5px] text-text-dim"
-                    placeholder="tag-one, tag-two, tag-three"
-                  />
-                ) : (
-                  page.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {page.tags.map((tag) => (
-                        <span key={tag} className="tag">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )
-                )}
+                <EditableText
+                  value={page.tags.join(", ")}
+                  field="tags"
+                  pagePath={page.path}
+                  editUnlocked={editUnlocked}
+                  className="font-mono text-[12.5px] text-text-dim"
+                  placeholder="tag-one, tag-two, tag-three"
+                  // Tags read as chips and edit as a comma-separated line, so
+                  // they look the same signed in or out.
+                  renderAs={(value) => (
+                    <span className="flex flex-wrap gap-2">
+                      {value
+                        .split(",")
+                        .map((t) => t.trim())
+                        .filter(Boolean)
+                        .map((tag) => (
+                          <span key={tag} className="tag">
+                            {tag}
+                          </span>
+                        ))}
+                    </span>
+                  )}
+                />
               </div>
             </div>
           </header>

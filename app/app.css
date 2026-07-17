@@ -388,7 +388,8 @@
 .wiki .quote-box > :last-child {
   margin-bottom: 0;
 }
-.wiki .quote-box .label {
+/* Direct child only — a nested callout or note keeps its own label styling. */
+.wiki .quote-box > .label {
   font-family: var(--font-mono);
   font-size: 11.5px;
   letter-spacing: 0.1em;
@@ -396,6 +397,15 @@
   color: var(--text-dim);
   font-weight: 600;
   margin: 0 0 8px;
+}
+/*
+ * A box nested inside a quote sits flush rather than spanning full width, and
+ * the first one doesn't need its own top margin under the quote's padding.
+ */
+.wiki .quote-box .callout-box:first-child,
+.wiki .quote-box .note:first-child,
+.wiki .quote-box .callout:first-child {
+  margin-top: 0;
 }
 
 .wiki .note {
