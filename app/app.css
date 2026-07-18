@@ -182,12 +182,14 @@
   white-space: pre-line;
 }
 .wiki a.ext,
+.wiki a.anchor,
 .wiki a.wikilink {
   color: var(--waccent);
   text-decoration: none;
   border-bottom: 1px solid var(--accent-line);
 }
 .wiki a.ext:hover,
+.wiki a.anchor:hover,
 .wiki a.wikilink:hover {
   border-bottom-width: 2px;
 }

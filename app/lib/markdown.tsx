@@ -786,11 +786,20 @@ export function renderInline(
       );
     } else if (m[10]) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!;
-      out.push(
-        <a key={k()} className="ext" href={lm[2]} target="_blank" rel="noreferrer">
-          {lm[1]}
-        </a>
-      );
+      if (lm[2].startsWith("#")) {
+        // An in-page anchor: link by hash so the route's scroll effect runs.
+        out.push(
+          <Link key={k()} className="anchor" to={lm[2]} preventScrollReset>
+            {renderInline(lm[1], ctx)}
+          </Link>
+        );
+      } else {
+        out.push(
+          <a key={k()} className="ext" href={lm[2]} target="_blank" rel="noreferrer">
+            {lm[1]}
+          </a>
+        );
+      }
     } else if (m[11]) {
       out.push(<strong key={k()}>{renderInline(token.slice(2, -2), ctx)}</strong>);
     } else if (m[12]) {
