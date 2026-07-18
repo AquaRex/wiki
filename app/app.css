@@ -494,12 +494,13 @@
   flex: none;
 }
 /* "mini" — a compact card that floats beside the text like an infobox. It pins
-   with the same <>c^v tokens (mini[>v]); default is float right, top. */
+   with the same <>c^v tokens (mini(>v)); default is float right, top. Zero top
+   margin keeps it flush with the section-top content beside it (see .infobox). */
 .wiki .contents-box.mini {
   float: right;
   clear: right;
   width: 260px;
-  margin: 22px 0 20px 28px;
+  margin: 0 0 20px 28px;
   padding: 16px 18px;
   font-size: 13px;
 }
@@ -515,12 +516,12 @@
 .wiki .contents-box.mini.h-left {
   float: left;
   clear: left;
-  margin: 22px 28px 20px 0;
+  margin: 0 28px 20px 0;
 }
 .wiki .contents-box.mini.h-right {
   float: right;
   clear: right;
-  margin: 22px 0 20px 28px;
+  margin: 0 0 20px 28px;
 }
 .wiki .contents-box.mini.h-center {
   float: none;
@@ -1127,9 +1128,9 @@
   float: right;
   clear: right;
   width: 300px;
-  /* 22px top matches the block rhythm of a paragraph or left image, so an
-     infobox and a left-pinned image starting the same section align at the top. */
-  margin: 22px 0 20px 28px;
+  /* No top margin: a float doesn't collapse margins, so any top margin would sit
+     it lower than the section-top content beside it. Zero keeps it flush at the top. */
+  margin: 0 0 20px 28px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 10px;
@@ -1141,12 +1142,12 @@
 .wiki .infobox.h-left {
   float: left;
   clear: left;
-  margin: 22px 28px 20px 0;
+  margin: 0 28px 20px 0;
 }
 .wiki .infobox.h-right {
   float: right;
   clear: right;
-  margin: 22px 0 20px 28px;
+  margin: 0 0 20px 28px;
 }
 /* Centre means a plain centred block, not a float — text sits above and below. */
 .wiki .infobox.h-center {
