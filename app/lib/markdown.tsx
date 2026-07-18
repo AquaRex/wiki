@@ -1030,6 +1030,10 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
       return <UnrealGraph key={k()} source={body.join("\n")} />;
     }
     case "infobox": {
+      // The title may carry an image-style pin token — `:::infobox Name >v` —
+      // to override the default (float right, top). It uses the same <>c^v
+      // markers as images, so left/centre and bottom pinning are available.
+      const { src: title, align } = splitImageAlign(dir.param);
       let image = "";
       const rows: { label: string; value: string }[] = [];
       const freeText: string[] = [];
@@ -1049,10 +1053,11 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
           }
         }
       }
+      const infoboxClass = `infobox${align.set ? ` ${alignClasses(align)}` : ""}`;
       return (
-        <aside key={k()} className="infobox">
-          {dir.param && <div className="ib-title">{renderInline(dir.param, ctx)}</div>}
-          {image && <Asset ctx={ctx} src={image} alt={dir.param} />}
+        <aside key={k()} className={infoboxClass}>
+          {title && <div className="ib-title">{renderInline(title, ctx)}</div>}
+          {image && <Asset ctx={ctx} src={image} alt={title} />}
           {rows.length > 0 && (
             <div className="ib-rows">
               {rows.map((row) => (

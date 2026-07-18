@@ -1033,13 +1033,36 @@
   float: right;
   clear: right;
   width: 300px;
-  margin: 6px 0 20px 28px;
+  /* 22px top matches the block rhythm of a paragraph or left image, so an
+     infobox and a left-pinned image starting the same section align at the top. */
+  margin: 22px 0 20px 28px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   box-shadow: var(--card-shadow);
   overflow: hidden;
   font-size: 13.5px;
+}
+/* Pin overrides — same <>c^v tokens as images, written after the title. */
+.wiki .infobox.h-left {
+  float: left;
+  clear: left;
+  margin: 22px 28px 20px 0;
+}
+.wiki .infobox.h-right {
+  float: right;
+  clear: right;
+  margin: 22px 0 20px 28px;
+}
+/* Centre means a plain centred block, not a float — text sits above and below. */
+.wiki .infobox.h-center {
+  float: none;
+  clear: both;
+  margin: 22px auto;
+}
+/* Bottom clears preceding floats so the box drops below them, mirroring images. */
+.wiki .infobox.v-bottom {
+  clear: both;
 }
 .wiki .infobox .ib-title {
   font-family: var(--font-mono);
@@ -1085,7 +1108,10 @@
   border-top: 1px solid var(--wborder);
 }
 @media (max-width: 720px) {
-  .wiki .infobox {
+  .wiki .infobox,
+  .wiki .infobox.h-left,
+  .wiki .infobox.h-right,
+  .wiki .infobox.h-center {
     float: none;
     width: 100%;
     margin: 18px 0;
