@@ -1500,9 +1500,20 @@
 /* ------------------------------------------------------------------ */
 /* :::roadmap — a Trello-style board                                    */
 /* ------------------------------------------------------------------ */
+/* The board is its own viewport: a quote-toned panel with a tall minimum height,
+   scrolling internally (both axes) so it never scrolls the page. */
 .wiki .roadmap {
   position: relative;
   margin: 24px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--card-shadow);
+  padding: 12px;
+  min-height: 420px;
+  max-height: 80vh;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .wiki .roadmap-empty {
   color: var(--text-faint);
@@ -1514,17 +1525,16 @@
   display: flex;
   gap: 14px;
   align-items: flex-start;
-  overflow-x: auto;
-  padding-bottom: 8px;
+  min-height: 396px;
 }
 .wiki .roadmap-col {
   flex: 0 0 260px;
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
+  background: var(--code-bg);
+  border: 1px solid var(--wborder);
   border-radius: 10px;
   display: flex;
   flex-direction: column;
-  max-height: 640px;
+  align-self: flex-start;
 }
 .wiki .roadmap-col.drag-over {
   border-color: var(--waccent);
@@ -1583,12 +1593,11 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  overflow-y: auto;
   min-height: 40px;
 }
 .wiki .roadmap-card {
   position: relative;
-  background: var(--code-bg);
+  background: var(--surface);
   border: 1px solid var(--wborder);
   border-radius: 8px;
   padding: 10px 12px;
@@ -1681,20 +1690,26 @@
   height: 14px;
 }
 
-/* Fullscreen card view — fills the viewport, X in its own top-right. */
+/* Card view — fills the BOARD's viewport (not the page). While it's open the
+   board itself stops scrolling so the overlay pins to the board's visible box
+   and scrolls its own content. */
+.wiki .roadmap-has-overlay {
+  overflow: hidden;
+}
 .wiki .roadmap-fullcard {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  z-index: 60;
-  background: var(--background);
+  z-index: 5;
+  background: var(--surface);
+  border-radius: 10px;
   overflow-y: auto;
-  padding: 48px max(24px, 6vw) 80px;
+  padding: 40px max(20px, 4vw) 48px;
 }
 .wiki .roadmap-fullcard-close {
-  position: fixed;
-  top: 18px;
-  right: 22px;
-  z-index: 61;
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 6;
   display: inline-flex;
   align-items: center;
   justify-content: center;

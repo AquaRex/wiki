@@ -63,6 +63,16 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
   const [editingCard, setEditingCard] = useState<{ colId: string; cardId: string } | null>(null);
   const drag = useRef<DragState>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // The card overlay is absolute within the board, so it must sit at the board's
+  // scroll origin — reset scroll to the top when one opens.
+  useEffect(() => {
+    if ((openCard || editingCard) && rootRef.current) {
+      rootRef.current.scrollTop = 0;
+      rootRef.current.scrollLeft = 0;
+    }
+  }, [openCard, editingCard]);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,8 +225,10 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
 
   const openCardData = openCard && board.columns.find((c) => c.id === openCard.colId)?.cards.find((cd) => cd.id === openCard.cardId);
 
+  const overlayOpen = Boolean((openCard && openCardData) || editingCard);
+
   return (
-    <div className="roadmap">
+    <div ref={rootRef} className={`roadmap${overlayOpen ? " roadmap-has-overlay" : ""}`}>
       <div className="roadmap-cols">
         {board.columns.map((col) => (
           <div
