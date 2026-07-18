@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Trash2, X, GripVertical, AlignLeft, Calendar, MessageSquare, Send, ChevronDown } from "lucide-react";
+import { Plus, Trash2, X, GripVertical, AlignLeft, Calendar, MessageSquare, Send } from "lucide-react";
 import { getStore } from "~/lib/store";
 import { useAuth } from "~/lib/auth";
 import { renderMarkdown, type RenderContext } from "~/lib/markdown";
@@ -527,6 +527,7 @@ function CardView({
   onDelete: () => void;
 }) {
   const [comment, setComment] = useState("");
+  const [sideTab, setSideTab] = useState<"comments" | "activity">("comments");
   const assignees = card.assignees ?? [];
 
   const postComment = () => {
@@ -547,7 +548,8 @@ function CardView({
         <X />
       </button>
       <div className="roadmap-fullcard-inner">
-        {/* Header: title on the left, due date pinned to the right. */}
+        {/* Header: title left, then assignees, then the due date — one row,
+            everything bottom-aligned to the title. */}
         <div className="roadmap-fullcard-header">
           <div className="roadmap-fullcard-heading">
             <div className="roadmap-fullcard-eyebrow">
@@ -569,20 +571,19 @@ function CardView({
             ) : (
               <div className="roadmap-fullcard-title wiki">{renderMarkdown(card.title, ctx)}</div>
             )}
-            {/* Assignees as quiet subtext under the header. */}
-            <div className="roadmap-fullcard-assignees">
-              {editable ? (
-                <AssigneeEditor names={assignees} onChange={(names) => onPatch({ assignees: names }, "changed assignees")} />
-              ) : assignees.length ? (
-                assignees.map((n) => (
-                  <span key={n} className="roadmap-assignee-chip">
-                    {n}
-                  </span>
-                ))
-              ) : (
-                <span className="roadmap-muted">No assignees</span>
-              )}
-            </div>
+          </div>
+          <div className="roadmap-fullcard-assignees">
+            {editable ? (
+              <AssigneeEditor names={assignees} onChange={(names) => onPatch({ assignees: names }, "changed assignees")} />
+            ) : assignees.length ? (
+              assignees.map((n) => (
+                <span key={n} className="roadmap-assignee-chip">
+                  {n}
+                </span>
+              ))
+            ) : (
+              <span className="roadmap-muted">No assignees</span>
+            )}
           </div>
           <label className="roadmap-due">
             <Calendar />
@@ -598,14 +599,14 @@ function CardView({
           </label>
         </div>
 
-        {/* Two columns: description (wide) + comments/activity (narrow). */}
+        {/* Two columns: description (wide) + a comments/activity rail (narrow).
+            Both scroll internally so the whole view fits the board viewport. */}
         <div className="roadmap-fullcard-cols">
           <div className="roadmap-fullcard-main">
             <div className="roadmap-fullcard-section-label">Description</div>
             {editable ? (
               <textarea
                 className="roadmap-body-input"
-                rows={7}
                 value={card.body}
                 placeholder="Full details — markdown: images, boxes, links, everything."
                 onChange={(e) => onPatch({ body: e.target.value })}
@@ -624,42 +625,58 @@ function CardView({
           </div>
 
           <div className="roadmap-fullcard-side">
-            <CollapsibleSection label="Comments" icon={<MessageSquare />} count={commentCount} defaultOpen>
-              <div className="roadmap-comments">
-                {(card.comments ?? []).map((c) => (
-                  <div key={c.id} className="roadmap-comment">
-                    <div className="roadmap-comment-head">
-                      <span className="roadmap-comment-who">{c.who}</span>
-                      <span className="roadmap-comment-at">{formatWhen(c.at)}</span>
-                    </div>
-                    <div className="wiki roadmap-comment-body">{renderMarkdown(c.text, ctx)}</div>
-                  </div>
-                ))}
-                {commentCount === 0 && <p className="roadmap-muted">No comments yet.</p>}
-              </div>
-              {editable && (
-                <div className="roadmap-comment-compose">
-                  <textarea
-                    rows={2}
-                    value={comment}
-                    placeholder="Write a comment…"
-                    onChange={(e) => setComment(e.target.value)}
-                    onKeyDown={(e) => {
-                      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                        e.preventDefault();
-                        postComment();
-                      }
-                    }}
-                  />
-                  <button className="roadmap-comment-send" title="Post (Ctrl+Enter)" onClick={postComment} disabled={!comment.trim()}>
-                    <Send />
-                  </button>
-                </div>
-              )}
-            </CollapsibleSection>
+            {/* One rail, two tabs — comments and activity replace each other. */}
+            <div className="roadmap-side-tabs">
+              <button
+                className={`roadmap-side-tab${sideTab === "comments" ? " active" : ""}`}
+                onClick={() => setSideTab("comments")}
+              >
+                <MessageSquare /> Comments{commentCount > 0 ? ` ${commentCount}` : ""}
+              </button>
+              <button
+                className={`roadmap-side-tab${sideTab === "activity" ? " active" : ""}`}
+                onClick={() => setSideTab("activity")}
+              >
+                Activity{activityCount > 0 ? ` ${activityCount}` : ""}
+              </button>
+            </div>
 
-            <CollapsibleSection label="Activity" count={activityCount} defaultOpen={false}>
-              <div className="roadmap-activity">
+            {sideTab === "comments" ? (
+              <>
+                <div className="roadmap-side-scroll roadmap-comments">
+                  {(card.comments ?? []).map((c) => (
+                    <div key={c.id} className="roadmap-comment">
+                      <div className="roadmap-comment-head">
+                        <span className="roadmap-comment-who">{c.who}</span>
+                        <span className="roadmap-comment-at">{formatWhen(c.at)}</span>
+                      </div>
+                      <div className="wiki roadmap-comment-body">{renderMarkdown(c.text, ctx)}</div>
+                    </div>
+                  ))}
+                  {commentCount === 0 && <p className="roadmap-muted">No comments yet.</p>}
+                </div>
+                {editable && (
+                  <div className="roadmap-comment-compose">
+                    <textarea
+                      rows={2}
+                      value={comment}
+                      placeholder="Write a comment…"
+                      onChange={(e) => setComment(e.target.value)}
+                      onKeyDown={(e) => {
+                        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                          e.preventDefault();
+                          postComment();
+                        }
+                      }}
+                    />
+                    <button className="roadmap-comment-send" title="Post (Ctrl+Enter)" onClick={postComment} disabled={!comment.trim()}>
+                      <Send />
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="roadmap-side-scroll roadmap-activity">
                 {(card.activity ?? [])
                   .slice()
                   .reverse()
@@ -671,38 +688,10 @@ function CardView({
                   ))}
                 {activityCount === 0 && <p className="roadmap-muted">No activity yet.</p>}
               </div>
-            </CollapsibleSection>
+            )}
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-/** A section on the card's side rail that collapses to just its header. */
-function CollapsibleSection({
-  label,
-  icon,
-  count,
-  defaultOpen,
-  children,
-}: {
-  label: string;
-  icon?: React.ReactNode;
-  count: number;
-  defaultOpen: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="roadmap-side-section">
-      <button className="roadmap-side-head" onClick={() => setOpen((o) => !o)}>
-        <ChevronDown className={`roadmap-side-chev${open ? " open" : ""}`} />
-        {icon}
-        <span>{label}</span>
-        {count > 0 && <span className="roadmap-side-count">{count}</span>}
-      </button>
-      {open && <div className="roadmap-side-body">{children}</div>}
     </div>
   );
 }

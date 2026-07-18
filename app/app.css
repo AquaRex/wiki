@@ -1524,7 +1524,9 @@
 .wiki .roadmap-cols {
   display: flex;
   gap: 14px;
-  align-items: flex-start;
+  /* Stretch so every column fills the board height — its drop zone then reaches
+     the bottom, so releasing a card in the empty space under a column adds it. */
+  align-items: stretch;
   min-height: 396px;
 }
 .wiki .roadmap-col {
@@ -1534,7 +1536,6 @@
   border-radius: 10px;
   display: flex;
   flex-direction: column;
-  align-self: flex-start;
 }
 /* A generous, obvious snap target while dragging a card over the column. */
 .wiki .roadmap-col.drag-over {
@@ -1889,8 +1890,11 @@
   z-index: 5;
   background: var(--surface);
   border-radius: 10px;
-  overflow-y: auto;
-  padding: 40px max(20px, 4vw) 48px;
+  /* Fit the board's viewport: the header stays put and the columns scroll
+     internally, so the page/window never needs a scrollbar for a card. */
+  display: flex;
+  overflow: hidden;
+  padding: 34px max(20px, 3vw) 24px;
 }
 .wiki .roadmap-fullcard-close {
   position: absolute;
@@ -1918,16 +1922,22 @@
 }
 .wiki .roadmap-fullcard-inner {
   max-width: var(--measure);
+  width: 100%;
   margin: 0 auto;
+  /* A column that fills the overlay: fixed header, then a flexible body. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
-/* Header: heading block on the left, due date pinned right. */
+/* Header: title + assignees + due date on one row, bottom-aligned. */
 .wiki .roadmap-fullcard-header {
   display: flex;
-  align-items: flex-start;
-  gap: 20px;
+  align-items: flex-end;
+  gap: 16px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--wborder);
-  margin-bottom: 18px;
+  margin-bottom: 16px;
+  flex: none;
 }
 .wiki .roadmap-fullcard-heading {
   flex: 1;
@@ -1966,12 +1976,16 @@
   padding: 0;
 }
 /* Assignees as quiet subtext under the header, like a heading kicker. */
+/* Assignees sit just left of the due date; the pair is pushed to the right edge
+   so the date lands all the way right. All three bottom-align to the title. */
 .wiki .roadmap-fullcard-assignees {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  margin-top: 8px;
+  max-width: 40%;
+  margin-left: auto;
 }
 .wiki .roadmap-due {
   flex: none;
@@ -1996,66 +2010,82 @@
   font-size: 12.5px;
 }
 
-/* Two-column body: wide description + narrow comments/activity rail. */
+/* Two-column body fills the remaining height; each side scrolls internally. */
 .wiki .roadmap-fullcard-cols {
   display: flex;
   gap: 28px;
-  align-items: flex-start;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 .wiki .roadmap-fullcard-main {
   flex: 1 1 60%;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.wiki .roadmap-fullcard-main .roadmap-fullcard-body,
+.wiki .roadmap-fullcard-main .roadmap-body-input {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .wiki .roadmap-fullcard-side {
   flex: 1 1 34%;
   min-width: 240px;
   max-width: 360px;
-}
-.wiki .roadmap-side-section {
-  border: 1px solid var(--wborder);
-  border-radius: 8px;
-  margin-bottom: 12px;
-  overflow: hidden;
-}
-.wiki .roadmap-side-head {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 9px 12px;
-  background: var(--code-bg);
-  border: none;
+  flex-direction: column;
+  min-height: 0;
+}
+/* Comments / Activity share one rail via two tabs. */
+.wiki .roadmap-side-tabs {
+  display: flex;
+  gap: 4px;
+  flex: none;
+  margin-bottom: 10px;
+}
+.wiki .roadmap-side-tab {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid var(--wborder);
+  border-radius: 7px;
+  background: transparent;
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.wiki .roadmap-side-tab svg {
+  width: 13px;
+  height: 13px;
+}
+.wiki .roadmap-side-tab.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
   color: var(--waccent);
   font-weight: 600;
 }
-.wiki .roadmap-side-head svg {
-  width: 14px;
-  height: 14px;
-}
-.wiki .roadmap-side-chev {
-  transition: transform 0.15s;
-  color: var(--text-faint);
-}
-.wiki .roadmap-side-chev.open {
-  transform: rotate(180deg);
-}
-.wiki .roadmap-side-count {
-  margin-left: auto;
-  color: var(--text-faint);
-}
-.wiki .roadmap-side-body {
-  padding: 12px;
+.wiki .roadmap-side-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .wiki .roadmap-body-del {
   width: auto;
   gap: 6px;
   padding: 6px 10px;
   margin-top: 14px;
+  flex: none;
+  align-self: flex-start;
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
@@ -2073,13 +2103,14 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: none;
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--waccent);
   font-weight: 600;
-  margin: 24px 0 10px;
+  margin: 0 0 10px;
 }
 .wiki .roadmap-fullcard-section-label svg {
   width: 14px;
@@ -2094,7 +2125,7 @@
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 13.5px;
-  resize: vertical;
+  resize: none;
   outline: none;
 }
 .wiki .roadmap-body-input:focus {
