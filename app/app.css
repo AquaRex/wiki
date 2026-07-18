@@ -410,7 +410,18 @@
   text-transform: uppercase;
   color: var(--waccent);
   font-weight: 600;
+  margin: 0 0 4px;
+}
+/* "^ subheader" line under the contents title, matching a heading's kicker. */
+.wiki .contents-box .toc-sub {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
   margin: 0 0 12px;
+}
+.wiki .contents-box .label + .toc-sub {
+  margin-top: 0;
 }
 .wiki .contents-box ul {
   list-style: none;
@@ -418,6 +429,10 @@
   padding: 0;
   columns: 2;
   column-gap: 32px;
+}
+/* "vertical" — one straight column, no flowing into a second. */
+.wiki .contents-box.vertical ul {
+  columns: 1;
 }
 .wiki .contents-box li {
   margin: 0;
@@ -432,18 +447,22 @@
 }
 .wiki .contents-box a.anchor {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   border-bottom: none;
 }
 .wiki .contents-box a.anchor:hover span:last-child {
   border-bottom: 1px solid var(--accent-line);
 }
+/* The number sits in an accent-outlined box, exactly like a ## heading's. */
 .wiki .contents-box .toc-num {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--waccent);
   font-weight: 600;
+  border: 1px solid var(--accent-line);
+  border-radius: 5px;
+  padding: 1px 6px;
   flex: none;
 }
 @media (max-width: 640px) {

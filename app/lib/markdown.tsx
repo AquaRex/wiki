@@ -942,6 +942,38 @@ export function extractHeadings(text: string, h2Start = 0): PageHeading[] {
   return out;
 }
 
+interface ContentsOptions {
+  /** Include ### / #### subheadings, not just ## sections. */
+  all: boolean;
+  /** Lay the list out as one vertical column instead of flowing into columns. */
+  vertical: boolean;
+  /** A hand-picked list of heading names to show, in the given order. */
+  only: string[] | null;
+  /** The box heading text (everything left after the keywords/list are removed). */
+  header: string;
+}
+
+/**
+ * Parses the text after `:::contents`. In any order it accepts the keywords
+ * `all` and `vertical`, an optional `[Name, Name]` filter list, and free header
+ * text — so `:::contents[Intro,Setup] vertical Overview` is understood as a
+ * two-item vertical box titled "Overview". The `[…]` may abut the word, as in
+ * `:::contents[a,b]`, since that reads naturally.
+ */
+function parseContentsParam(param: string): ContentsOptions {
+  let rest = param;
+  let only: string[] | null = null;
+  const list = /\[([^\]]*)\]/.exec(rest);
+  if (list) {
+    only = list[1].split(",").map((s) => s.trim()).filter(Boolean);
+    rest = rest.slice(0, list.index) + rest.slice(list.index + list[0].length);
+  }
+  const all = /\ball\b/i.test(rest);
+  const vertical = /\bvertical\b/i.test(rest);
+  const header = rest.replace(/\ball\b/i, "").replace(/\bvertical\b/i, "").trim();
+  return { all, vertical, only, header };
+}
+
 function Heading({
   level,
   text,
@@ -1083,15 +1115,27 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
      * listed by default; add `all` to include ### / #### subheadings too.
      */
     case "contents": {
-      const includeSub = /\ball\b/i.test(dir.param);
-      const items = (ctx.headings ?? []).filter((h) => includeSub || h.level === 2);
+      const opts = parseContentsParam(dir.param);
+      let items = ctx.headings ?? [];
+      if (opts.only) {
+        // An explicit [a,b,c] list picks headings by name, keeping the order the
+        // author wrote — so the box can be a hand-curated subset, not the page order.
+        const want = opts.only.map((s) => s.toLowerCase());
+        items = want
+          .map((name) => items.find((h) => h.text.trim().toLowerCase() === name))
+          .filter((h): h is PageHeading => h !== undefined);
+      } else if (!opts.all) {
+        items = items.filter((h) => h.level === 2);
+      }
       if (items.length === 0) {
         return null;
       }
-      const label = dir.param.replace(/\ball\b/i, "").trim();
+      // A "^ subheader" line in the body becomes the box's subtext, like a heading's.
+      const sub = dir.lines.map((l) => l.trim()).find((l) => l.startsWith("^ "));
       return (
-        <nav key={k()} className="contents-box" aria-label="Contents">
-          <p className="label">{label ? renderInline(label, ctx) : "Contents"}</p>
+        <nav key={k()} className={`contents-box${opts.vertical ? " vertical" : ""}`} aria-label="Contents">
+          <p className="label">{opts.header ? renderInline(opts.header, ctx) : "Contents"}</p>
+          {sub && <p className="toc-sub">{renderInline(sub.slice(2), ctx)}</p>}
           <ul>
             {items.map((h) => (
               <li key={k()} className={`toc-l${h.level}`}>
