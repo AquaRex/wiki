@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Trash2, X, GripVertical, AlignLeft, Calendar, MessageSquare, Send } from "lucide-react";
+import { Plus, Trash2, X, GripVertical, AlignLeft, Calendar, MessageSquare, Send, ChevronDown } from "lucide-react";
 import { getStore } from "~/lib/store";
 import { useAuth } from "~/lib/auth";
 import { renderMarkdown, type RenderContext } from "~/lib/markdown";
@@ -69,6 +69,7 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
   const [board, setBoard] = useState<BoardData | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [openCard, setOpenCard] = useState<{ colId: string; cardId: string } | null>(null);
+  const [confirmAsk, setConfirmAsk] = useState<{ message: string; onYes: () => void } | null>(null);
   const drag = useRef<DragState>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -160,13 +161,15 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
   };
 
   const deleteCard = (colId: string, cardId: string) => {
-    if (!confirm("Delete this card?")) {
-      return;
-    }
-    mapColumns((cols) => cols.map((c) => (c.id === colId ? { ...c, cards: c.cards.filter((cd) => cd.id !== cardId) } : c)));
-    if (openCard?.cardId === cardId) {
-      setOpenCard(null);
-    }
+    setConfirmAsk({
+      message: "Delete this card? This can’t be undone.",
+      onYes: () => {
+        mapColumns((cols) => cols.map((c) => (c.id === colId ? { ...c, cards: c.cards.filter((cd) => cd.id !== cardId) } : c)));
+        if (openCard?.cardId === cardId) {
+          setOpenCard(null);
+        }
+      },
+    });
   };
 
   /** Moves a card to targetCol, before targetCardId (or to the end when null). */
@@ -210,10 +213,12 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
     mapColumns((cols) => cols.map((c) => (c.id === colId ? { ...c, ...patch } : c)));
   const deleteColumn = (colId: string) => {
     const col = board.columns.find((c) => c.id === colId);
-    if (col && col.cards.length > 0 && !confirm(`Delete "${col.title}" and its ${col.cards.length} card(s)?`)) {
-      return;
+    const remove = () => mapColumns((cols) => cols.filter((c) => c.id !== colId));
+    if (col && col.cards.length > 0) {
+      setConfirmAsk({ message: `Delete "${col.title}" and its ${col.cards.length} card(s)?`, onYes: remove });
+    } else {
+      remove();
     }
-    mapColumns((cols) => cols.filter((c) => c.id !== colId));
   };
   const moveColumn = (colId: string, targetColId: string) => {
     mapColumns((cols) => {
@@ -244,7 +249,7 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
   const openData = openCol?.cards.find((cd) => cd.id === openCard!.cardId);
 
   return (
-    <div ref={rootRef} className={`roadmap${openCard ? " roadmap-has-overlay" : ""}`}>
+    <div ref={rootRef} className={`roadmap${openCard || confirmAsk ? " roadmap-has-overlay" : ""}`}>
       <div className="roadmap-cols">
         {board.columns.map((col) => (
           <div
@@ -314,8 +319,6 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
                   ctx={ctx}
                   onOpen={() => setOpenCard({ colId: col.id, cardId: card.id })}
                   onDelete={() => deleteCard(col.id, card.id)}
-                  onTitle={(title) => patchCard(col.id, card.id, { title })}
-                  onAssignees={(assignees) => patchCard(col.id, card.id, { assignees }, "changed assignees")}
                   onDragStart={(e) => {
                     e.dataTransfer.setData("text/plain", card.id);
                     drag.current = { kind: "card", colId: col.id, cardId: card.id };
@@ -371,6 +374,48 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
           onDelete={() => deleteCard(openCard.colId, openCard.cardId)}
         />
       )}
+
+      {confirmAsk && (
+        <ConfirmDialog
+          message={confirmAsk.message}
+          onYes={() => {
+            confirmAsk.onYes();
+            setConfirmAsk(null);
+          }}
+          onNo={() => setConfirmAsk(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A small confirm dialog rendered inside the board, replacing window.confirm. */
+function ConfirmDialog({ message, onYes, onNo }: { message: string; onYes: () => void; onNo: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onNo();
+      }
+      if (e.key === "Enter") {
+        onYes();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onYes, onNo]);
+  return (
+    <div className="roadmap-confirm-backdrop" onClick={onNo}>
+      <div className="roadmap-confirm" role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <p className="roadmap-confirm-msg">{message}</p>
+        <div className="roadmap-confirm-actions">
+          <button className="roadmap-confirm-no" onClick={onNo}>
+            Cancel
+          </button>
+          <button className="roadmap-confirm-yes" onClick={onYes}>
+            Delete
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -386,8 +431,6 @@ function CardFace({
   ctx,
   onOpen,
   onDelete,
-  onTitle,
-  onAssignees,
   onDragStart,
   onDragOverCard,
   onDropCard,
@@ -398,8 +441,6 @@ function CardFace({
   ctx: RenderContext;
   onOpen: () => void;
   onDelete: () => void;
-  onTitle: (title: string) => void;
-  onAssignees: (names: string[]) => void;
   onDragStart: (e: React.DragEvent) => void;
   onDragOverCard: (e: React.DragEvent) => void;
   onDropCard: (e: React.DragEvent) => void;
@@ -430,22 +471,7 @@ function CardFace({
         </button>
       )}
 
-      {editable ? (
-        <textarea
-          className="roadmap-card-title-input"
-          rows={1}
-          value={card.title}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => onTitle(e.target.value)}
-          onInput={(e) => {
-            const el = e.currentTarget;
-            el.style.height = "0px";
-            el.style.height = el.scrollHeight + "px";
-          }}
-        />
-      ) : (
-        <div className="roadmap-card-title wiki">{renderMarkdown(card.title, ctx)}</div>
-      )}
+      <div className="roadmap-card-title wiki">{renderMarkdown(card.title, ctx)}</div>
 
       <div className="roadmap-card-foot">
         {tone && <span className={`roadmap-status-dot tone-${tone}`} title="Status" />}
@@ -465,15 +491,11 @@ function CardFace({
           </span>
         )}
         <span className="roadmap-foot-spacer" />
-        {editable ? (
-          <AssigneeEditor names={assignees} onChange={onAssignees} />
-        ) : (
-          assignees.map((n) => (
-            <span key={n} className="roadmap-assignee" title={n}>
-              {initials(n)}
-            </span>
-          ))
-        )}
+        {assignees.map((n) => (
+          <span key={n} className="roadmap-assignee" title={n}>
+            {initials(n)}
+          </span>
+        ))}
       </div>
     </div>
   );
@@ -516,36 +538,53 @@ function CardView({
     setComment("");
   };
 
+  const commentCount = card.comments?.length ?? 0;
+  const activityCount = card.activity?.length ?? 0;
+
   return (
     <div className="roadmap-fullcard" role="dialog" aria-modal="true">
       <button className="roadmap-fullcard-close" title="Close" onClick={onClose}>
         <X />
       </button>
       <div className="roadmap-fullcard-inner">
-        <div className="roadmap-fullcard-eyebrow">
-          {tone && <span className={`roadmap-status-dot tone-${tone}`} />}
-          {columnTitle}
-        </div>
-
-        {editable ? (
-          <textarea
-            className="roadmap-fullcard-title-input"
-            rows={1}
-            value={card.title}
-            onChange={(e) => onPatch({ title: e.target.value })}
-            onInput={(e) => {
-              const el = e.currentTarget;
-              el.style.height = "0px";
-              el.style.height = el.scrollHeight + "px";
-            }}
-          />
-        ) : (
-          <div className="roadmap-fullcard-title wiki">{renderMarkdown(card.title, ctx)}</div>
-        )}
-
-        {/* Meta row: due date + assignees */}
-        <div className="roadmap-fullcard-meta">
-          <label className="roadmap-meta-field">
+        {/* Header: title on the left, due date pinned to the right. */}
+        <div className="roadmap-fullcard-header">
+          <div className="roadmap-fullcard-heading">
+            <div className="roadmap-fullcard-eyebrow">
+              {tone && <span className={`roadmap-status-dot tone-${tone}`} />}
+              {columnTitle}
+            </div>
+            {editable ? (
+              <textarea
+                className="roadmap-fullcard-title-input"
+                rows={1}
+                value={card.title}
+                onChange={(e) => onPatch({ title: e.target.value })}
+                onInput={(e) => {
+                  const el = e.currentTarget;
+                  el.style.height = "0px";
+                  el.style.height = el.scrollHeight + "px";
+                }}
+              />
+            ) : (
+              <div className="roadmap-fullcard-title wiki">{renderMarkdown(card.title, ctx)}</div>
+            )}
+            {/* Assignees as quiet subtext under the header. */}
+            <div className="roadmap-fullcard-assignees">
+              {editable ? (
+                <AssigneeEditor names={assignees} onChange={(names) => onPatch({ assignees: names }, "changed assignees")} />
+              ) : assignees.length ? (
+                assignees.map((n) => (
+                  <span key={n} className="roadmap-assignee-chip">
+                    {n}
+                  </span>
+                ))
+              ) : (
+                <span className="roadmap-muted">No assignees</span>
+              )}
+            </div>
+          </div>
+          <label className="roadmap-due">
             <Calendar />
             {editable ? (
               <input
@@ -557,95 +596,113 @@ function CardView({
               <span>{card.due ? formatDue(card.due) : "No due date"}</span>
             )}
           </label>
-          <div className="roadmap-meta-field">
-            <span className="roadmap-meta-label">Assignees</span>
+        </div>
+
+        {/* Two columns: description (wide) + comments/activity (narrow). */}
+        <div className="roadmap-fullcard-cols">
+          <div className="roadmap-fullcard-main">
+            <div className="roadmap-fullcard-section-label">Description</div>
             {editable ? (
-              <AssigneeEditor names={assignees} onChange={(names) => onPatch({ assignees: names }, "changed assignees")} />
-            ) : assignees.length ? (
-              assignees.map((n) => (
-                <span key={n} className="roadmap-assignee-chip">
-                  {n}
-                </span>
-              ))
+              <textarea
+                className="roadmap-body-input"
+                rows={7}
+                value={card.body}
+                placeholder="Full details — markdown: images, boxes, links, everything."
+                onChange={(e) => onPatch({ body: e.target.value })}
+                onBlur={() => onPatch({}, undefined)}
+              />
+            ) : card.body.trim() ? (
+              <div className="wiki roadmap-fullcard-body">{renderMarkdown(card.body, ctx)}</div>
             ) : (
-              <span className="roadmap-muted">None</span>
+              <p className="roadmap-muted">No description yet.</p>
+            )}
+            {editable && (
+              <button className="roadmap-icon-btn roadmap-body-del" title="Delete card" onClick={onDelete}>
+                <Trash2 /> Delete card
+              </button>
             )}
           </div>
-          {editable && (
-            <button className="roadmap-icon-btn roadmap-meta-del" title="Delete card" onClick={onDelete}>
-              <Trash2 />
-            </button>
-          )}
-        </div>
 
-        {/* Description (body) */}
-        <div className="roadmap-fullcard-section-label">Description</div>
-        {editable ? (
-          <textarea
-            className="roadmap-body-input"
-            rows={10}
-            value={card.body}
-            placeholder="Full details — markdown: images, boxes, links, everything."
-            onChange={(e) => onPatch({ body: e.target.value })}
-            onBlur={() => onPatch({}, undefined)}
-          />
-        ) : card.body.trim() ? (
-          <div className="wiki roadmap-fullcard-body">{renderMarkdown(card.body, ctx)}</div>
-        ) : (
-          <p className="roadmap-muted">No description yet.</p>
-        )}
-
-        {/* Comments */}
-        <div className="roadmap-fullcard-section-label">
-          <MessageSquare /> Comments
-        </div>
-        <div className="roadmap-comments">
-          {(card.comments ?? []).map((c) => (
-            <div key={c.id} className="roadmap-comment">
-              <div className="roadmap-comment-head">
-                <span className="roadmap-comment-who">{c.who}</span>
-                <span className="roadmap-comment-at">{formatWhen(c.at)}</span>
+          <div className="roadmap-fullcard-side">
+            <CollapsibleSection label="Comments" icon={<MessageSquare />} count={commentCount} defaultOpen>
+              <div className="roadmap-comments">
+                {(card.comments ?? []).map((c) => (
+                  <div key={c.id} className="roadmap-comment">
+                    <div className="roadmap-comment-head">
+                      <span className="roadmap-comment-who">{c.who}</span>
+                      <span className="roadmap-comment-at">{formatWhen(c.at)}</span>
+                    </div>
+                    <div className="wiki roadmap-comment-body">{renderMarkdown(c.text, ctx)}</div>
+                  </div>
+                ))}
+                {commentCount === 0 && <p className="roadmap-muted">No comments yet.</p>}
               </div>
-              <div className="wiki roadmap-comment-body">{renderMarkdown(c.text, ctx)}</div>
-            </div>
-          ))}
-          {(card.comments ?? []).length === 0 && <p className="roadmap-muted">No comments yet.</p>}
-        </div>
-        {editable && (
-          <div className="roadmap-comment-compose">
-            <textarea
-              rows={2}
-              value={comment}
-              placeholder="Write a comment…"
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  postComment();
-                }
-              }}
-            />
-            <button className="roadmap-comment-send" title="Post (Ctrl+Enter)" onClick={postComment} disabled={!comment.trim()}>
-              <Send />
-            </button>
+              {editable && (
+                <div className="roadmap-comment-compose">
+                  <textarea
+                    rows={2}
+                    value={comment}
+                    placeholder="Write a comment…"
+                    onChange={(e) => setComment(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                        e.preventDefault();
+                        postComment();
+                      }
+                    }}
+                  />
+                  <button className="roadmap-comment-send" title="Post (Ctrl+Enter)" onClick={postComment} disabled={!comment.trim()}>
+                    <Send />
+                  </button>
+                </div>
+              )}
+            </CollapsibleSection>
+
+            <CollapsibleSection label="Activity" count={activityCount} defaultOpen={false}>
+              <div className="roadmap-activity">
+                {(card.activity ?? [])
+                  .slice()
+                  .reverse()
+                  .map((a, i) => (
+                    <div key={i} className="roadmap-activity-row">
+                      <span className="roadmap-activity-who">{a.who}</span> {a.what}
+                      <span className="roadmap-activity-at">{formatWhen(a.at)}</span>
+                    </div>
+                  ))}
+                {activityCount === 0 && <p className="roadmap-muted">No activity yet.</p>}
+              </div>
+            </CollapsibleSection>
           </div>
-        )}
-
-        {/* Activity */}
-        <div className="roadmap-fullcard-section-label">Activity</div>
-        <div className="roadmap-activity">
-          {(card.activity ?? [])
-            .slice()
-            .reverse()
-            .map((a, i) => (
-              <div key={i} className="roadmap-activity-row">
-                <span className="roadmap-activity-who">{a.who}</span> {a.what}
-                <span className="roadmap-activity-at">{formatWhen(a.at)}</span>
-              </div>
-            ))}
-          {(card.activity ?? []).length === 0 && <p className="roadmap-muted">No activity yet.</p>}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A section on the card's side rail that collapses to just its header. */
+function CollapsibleSection({
+  label,
+  icon,
+  count,
+  defaultOpen,
+  children,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  count: number;
+  defaultOpen: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="roadmap-side-section">
+      <button className="roadmap-side-head" onClick={() => setOpen((o) => !o)}>
+        <ChevronDown className={`roadmap-side-chev${open ? " open" : ""}`} />
+        {icon}
+        <span>{label}</span>
+        {count > 0 && <span className="roadmap-side-count">{count}</span>}
+      </button>
+      {open && <div className="roadmap-side-body">{children}</div>}
     </div>
   );
 }
