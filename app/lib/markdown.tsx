@@ -139,7 +139,9 @@ function Asset({
   // A pinned width/height sets that dimension; the other stays `auto` so the
   // aspect ratio is kept when only one is given. maxWidth keeps it responsive.
   const style: React.CSSProperties = { cursor: "zoom-in" };
-  if (size?.width != null) {
+  if (size?.width === "max") {
+    style.width = "100%";
+  } else if (size?.width != null) {
     style.width = size.width;
     style.maxWidth = "100%";
   }
@@ -325,7 +327,8 @@ function alignClasses(align: ImageAlign): string {
 }
 
 export interface ImageSize {
-  width: number | null;
+  /** A pixel width, or "max" to fill the available width. Height has no "max". */
+  width: number | "max" | null;
   height: number | null;
 }
 
@@ -336,6 +339,7 @@ const EMPTY_SIZE: ImageSize = { width: null, height: null };
  *   ![cap](/x.png){w=300}          — width only (height keeps the aspect ratio)
  *   ![cap](/x.png){h=200}          — height only (width keeps the aspect ratio)
  *   ![cap](/x.png){w=300, h=200}   — both, exact box (order doesn't matter)
+ *   ![cap](/x.png){w=max}          — fill the available width (no height "max")
  * Accepts `w`/`width` and `h`/`height`, pixels. Since we click to view an image
  * full size, a smaller inline size is fine.
  */
@@ -343,9 +347,18 @@ function parseImageSize(suffix: string | undefined): ImageSize {
   if (!suffix) {
     return EMPTY_SIZE;
   }
-  const w = /\b(?:w|width)\s*=\s*(\d{1,4})\s*(?:px)?/i.exec(suffix);
+  const w = /\b(?:w|width)\s*=\s*(max|\d{1,4})\s*(?:px)?/i.exec(suffix);
   const h = /\b(?:h|height)\s*=\s*(\d{1,4})\s*(?:px)?/i.exec(suffix);
-  return { width: w ? Number(w[1]) : null, height: h ? Number(h[1]) : null };
+  const width = w ? (/^max$/i.test(w[1]) ? "max" : Number(w[1])) : null;
+  return { width, height: h ? Number(h[1]) : null };
+}
+
+/** The `maxWidth` a figure wrapper should carry for a given image width. */
+function figureMaxWidth(width: ImageSize["width"]): string | number | undefined {
+  if (width === "max") {
+    return "100%";
+  }
+  return width ?? undefined;
 }
 
 /** Splits an image token into its `![…](…)` part and any trailing `{…}` suffix. */
@@ -1437,7 +1450,7 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
         const im = rowImages[0];
         const figClass = `wk-img ${alignClasses(im.align)}`;
         out.push(
-          <figure key={bk("img", im.src)} className={figClass} style={im.size.width != null ? { maxWidth: im.size.width } : undefined}>
+          <figure key={bk("img", im.src)} className={figClass} style={im.size.width != null ? { maxWidth: figureMaxWidth(im.size.width) } : undefined}>
             <Asset ctx={ctx} src={im.src} alt={plainCaption(im.caption)} size={im.size} />
             {im.caption && <figcaption>{renderInline(im.caption, ctx)}</figcaption>}
           </figure>
@@ -1448,7 +1461,7 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
         out.push(
           <div key={bk("imgrow", line.trim())} className={`wk-img-row row-${rowAlign}`}>
             {rowImages.map((im, idx) => (
-              <figure key={idx} className="wk-img" style={im.size.width != null ? { maxWidth: im.size.width } : undefined}>
+              <figure key={idx} className="wk-img" style={im.size.width != null ? { maxWidth: figureMaxWidth(im.size.width) } : undefined}>
                 <Asset ctx={ctx} src={im.src} alt={plainCaption(im.caption)} size={im.size} />
                 {im.caption && <figcaption>{renderInline(im.caption, ctx)}</figcaption>}
               </figure>
