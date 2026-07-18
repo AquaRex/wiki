@@ -1233,14 +1233,34 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
   }
 }
 
+/**
+ * Splits a table row into cells on the `|` separators, honouring `\|` as a
+ * literal pipe (the standard markdown escape) so a cell can contain one — e.g.
+ * `{{TermNote(Name\|explanation)}}`. The escape is then removed so the cell
+ * renders a bare `|`.
+ */
+function splitTableCells(line: string): string[] {
+  const inner = line.replace(/^\s*\|/, "").replace(/\|\s*$/, "");
+  const cells: string[] = [];
+  let current = "";
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === "\\" && inner[i + 1] === "|") {
+      current += "|";
+      i++;
+    } else if (ch === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
 function renderTable(lines: string[], ctx: RenderContext): React.ReactNode {
-  const rows = lines.map((line) =>
-    line
-      .replace(/^\s*\|/, "")
-      .replace(/\|\s*$/, "")
-      .split("|")
-      .map((cell) => cell.trim())
-  );
+  const rows = lines.map(splitTableCells);
   let header: string[] | null = null;
   let bodyRows = rows;
   if (rows.length >= 2 && rows[1].every((cell) => /^:?-{2,}:?$/.test(cell))) {
