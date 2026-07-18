@@ -957,24 +957,39 @@
   border-style: dashed;
   cursor: help;
 }
-/* The hover explanation overlay — orange border, brown background, white text,
-   positioned at the cursor (fixed, since we use client coordinates). The brown
-   is fixed (not accent-soft, which is pale in light mode) so white always reads. */
-.wiki .term-overlay {
+/* The shared hover card used by every def/ref (variables and terms). Orange
+   border, fixed dark background (#1c222c) so text reads in both themes,
+   positioned at the cursor (fixed = viewport coords). Its content is fully
+   formatted wiki markup. */
+.wiki .hovercard {
   position: fixed;
   z-index: 60;
-  max-width: 320px;
-  background: #2a1e0f;
+  max-width: 340px;
+  background: #1c222c;
   border: 1px solid var(--waccent);
   border-radius: 6px;
-  padding: 8px 11px;
-  color: #fff;
+  padding: 8px 12px;
+  color: #e6e9ee;
+  font-family: var(--font-body, inherit);
   font-size: 13px;
-  line-height: 1.5;
-  font-weight: 500;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  line-height: 1.55;
+  font-weight: 400;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   white-space: normal;
+}
+/* The card's inner .wiki formats like body text but compact and on-dark. */
+.wiki .hovercard .wiki {
+  color: #e6e9ee;
+}
+.wiki .hovercard code {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.wiki .hovercard strong {
+  color: #fff;
 }
 .vardef-flash {
   animation: vardef-flash 1.6s ease-out;

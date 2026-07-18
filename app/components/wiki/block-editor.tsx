@@ -127,7 +127,7 @@ const SNIPPETS: Snippet[] = [
   { label: "Private var", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What it controls|private}}" },
   { label: "Var ref", icon: <Braces className="size-3.5" />, text: "{{varName|shown text}}" },
   { label: "Term def", icon: <Braces className="size-3.5" />, text: "{{TypeDef(Hearing)}}" },
-  { label: "Term note", icon: <Braces className="size-3.5" />, text: "{{TypeDef(Hearing|A short explanation shown on hover)}}" },
+  { label: "Term note", icon: <Braces className="size-3.5" />, text: "{{TypeNote(Hearing|A **formatted** explanation shown on hover)}}" },
   { label: "Term ref", icon: <Braces className="size-3.5" />, text: "{{TypeRef(Hearing)}}" },
   { label: "Value", icon: <Braces className="size-3.5" />, text: "{{0.57|why this value}}" },
   { label: "Code block", icon: <Code2 className="size-3.5" />, text: "```csharp:EnemyAI.cs\n// code here\n```", block: true },
