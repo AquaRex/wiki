@@ -451,8 +451,12 @@
   gap: 10px;
   border-bottom: none;
 }
+/* Underline via text-decoration, not border, so hover adds no height and the
+   multi-column list doesn't reflow as the cursor moves down it. */
 .wiki .contents-box a.anchor:hover span:last-child {
-  border-bottom: 1px solid var(--accent-line);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 3px;
 }
 /* The number sits in an accent-outlined box, exactly like a ## heading's. */
 .wiki .contents-box .toc-num {
