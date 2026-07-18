@@ -38,7 +38,7 @@ import {
   Check,
 } from "lucide-react";
 import { Button } from "~/components/ui/button";
-import { renderMarkdown, countH2, type RenderContext } from "~/lib/markdown";
+import { renderMarkdown, countH2, extractHeadings, type RenderContext } from "~/lib/markdown";
 import { extractTerms, extractVariables, newBlockId, type WikiBlock, type WikiPage } from "~/lib/shared";
 import { getStore } from "~/lib/store";
 
@@ -714,6 +714,18 @@ export function BlockList({
   const [editingId, setEditingId] = useState<string | null>(null);
   const { mutate } = useMutatePage(pagePath);
 
+  // The whole page's headings, so any block's :::contents box can list them.
+  // Recomputed only when the blocks' text changes.
+  const pageCtx = useMemo<RenderContext>(() => {
+    let h2 = 0;
+    const headings = blocks.flatMap((block) => {
+      const start = h2;
+      h2 += countH2(block.text);
+      return extractHeadings(block.text, start);
+    });
+    return { ...ctx, headings };
+  }, [ctx, blocks]);
+
   let h2Count = 0;
 
   if (!editUnlocked) {
@@ -722,7 +734,7 @@ export function BlockList({
         {blocks.map((block) => {
           const start = h2Count;
           h2Count += countH2(block.text);
-          return <div key={block.id}>{renderMarkdown(block.text, ctx, start)}</div>;
+          return <div key={block.id}>{renderMarkdown(block.text, pageCtx, start)}</div>;
         })}
         <div className="clear-both" />
       </div>
@@ -756,7 +768,7 @@ export function BlockList({
         return (
           <div key={block.id}>
             {editingId === block.id ? (
-              <BlockEditorPanel block={block} pagePath={pagePath} ctx={ctx} h2Start={start} onClose={() => setEditingId(null)} />
+              <BlockEditorPanel block={block} pagePath={pagePath} ctx={pageCtx} h2Start={start} onClose={() => setEditingId(null)} />
             ) : (
               <div className="edit-block" onDoubleClick={() => setEditingId(block.id)}>
                 <div className="block-tools absolute -top-3 right-2 z-20 flex items-center gap-0.5 rounded-md border border-border bg-surface p-0.5 shadow-md">
@@ -779,7 +791,7 @@ export function BlockList({
                     <Trash2 />
                   </Button>
                 </div>
-                {renderMarkdown(block.text, ctx, start)}
+                {renderMarkdown(block.text, pageCtx, start)}
               </div>
             )}
             <AddBlockButton pagePath={pagePath} afterId={block.id} />

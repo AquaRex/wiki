@@ -394,6 +394,64 @@
   font-weight: 500;
 }
 
+/* ":::contents" — an auto-built table of contents from the page's headings. */
+.wiki .contents-box {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 20px 24px;
+  margin: 26px 0;
+  box-shadow: var(--card-shadow);
+}
+.wiki .contents-box .label {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--waccent);
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.wiki .contents-box ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  columns: 2;
+  column-gap: 32px;
+}
+.wiki .contents-box li {
+  margin: 0;
+  padding: 3px 0;
+  break-inside: avoid;
+}
+.wiki .contents-box li.toc-l3 {
+  padding-left: 20px;
+}
+.wiki .contents-box li.toc-l4 {
+  padding-left: 40px;
+}
+.wiki .contents-box a.anchor {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-bottom: none;
+}
+.wiki .contents-box a.anchor:hover span:last-child {
+  border-bottom: 1px solid var(--accent-line);
+}
+.wiki .contents-box .toc-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--waccent);
+  font-weight: 600;
+  flex: none;
+}
+@media (max-width: 640px) {
+  .wiki .contents-box ul {
+    columns: 1;
+  }
+}
+
 /*
  * ":::quote" — displayed material that isn't code. Same surface as a code
  * block but without the accent rule, and it wraps instead of scrolling: a

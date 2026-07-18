@@ -29,6 +29,23 @@ export interface RenderContext {
   project?: string;
   /** Async because a private image's URL must be signed on demand. */
   resolveAsset?: (src: string) => Promise<string>;
+  /**
+   * Every heading on the page, in order — supplied by the page renderer so a
+   * :::contents box can list them. Undefined when rendering out of page context
+   * (e.g. a hover card), in which case :::contents has nothing to show.
+   */
+  headings?: PageHeading[];
+}
+
+export interface PageHeading {
+  /** 2 for ## / # , 3 for ### , 4 for #### . */
+  level: number;
+  /** The heading text with its markup stripped for the anchor label. */
+  text: string;
+  /** slugify(text) — matches the id the Heading component renders. */
+  slug: string;
+  /** The auto-number shown before a ## section; undefined for other levels. */
+  num?: number;
 }
 
 /**
@@ -862,6 +879,56 @@ function splitHeadingImage(text: string): {
   return { text: match[1].trim(), image: { alt: match[2], src: match[3] } };
 }
 
+/**
+ * Scans page text for every heading, in order, mirroring how renderBlocks
+ * detects and numbers them: ## sections carry a running auto-number, code and
+ * raw fences are skipped so a `## ` inside them isn't picked up. The slug and
+ * label match what the Heading component renders, so a :::contents link lands
+ * on the right element. `h2Start` continues the numbering from earlier blocks.
+ */
+export function extractHeadings(text: string, h2Start = 0): PageHeading[] {
+  const out: PageHeading[] = [];
+  let h2 = h2Start;
+  let fence: string | null = null;
+  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+    const fenceMatch = /^(```|~{3,})/.exec(line);
+    if (fenceMatch) {
+      const marker = fenceMatch[1].startsWith("`") ? "```" : "~~~";
+      fence = fence === null ? marker : fence === marker ? null : fence;
+      continue;
+    }
+    if (fence !== null) {
+      continue;
+    }
+    let level = 0;
+    let rest = "";
+    if (line.startsWith("#### ")) {
+      level = 4;
+      rest = line.slice(5);
+    } else if (line.startsWith("### ")) {
+      level = 3;
+      rest = line.slice(4);
+    } else if (line.startsWith("## ")) {
+      level = 2;
+      rest = line.slice(3);
+    } else if (line.startsWith("# ")) {
+      // An unnumbered top heading still renders as an h2, but carries no number.
+      level = 2;
+      rest = line.slice(2);
+    }
+    if (!level) {
+      continue;
+    }
+    const label = splitHeadingImage(rest).text;
+    const numbered = line.startsWith("## ");
+    if (numbered) {
+      h2++;
+    }
+    out.push({ level, text: label, slug: slugify(label), num: numbered ? h2 : undefined });
+  }
+  return out;
+}
+
 function Heading({
   level,
   text,
@@ -989,6 +1056,35 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
             </div>
           ))}
         </aside>
+      );
+    }
+    /*
+     * A table of contents that builds itself from the page's headings, so it
+     * stays in sync as headings are added, removed or renamed. The `param` after
+     * `:::contents` is an optional heading for the box. Only ## sections are
+     * listed by default; add `all` to include ### / #### subheadings too.
+     */
+    case "contents": {
+      const includeSub = /\ball\b/i.test(dir.param);
+      const items = (ctx.headings ?? []).filter((h) => includeSub || h.level === 2);
+      if (items.length === 0) {
+        return null;
+      }
+      const label = dir.param.replace(/\ball\b/i, "").trim();
+      return (
+        <nav key={k()} className="contents-box" aria-label="Contents">
+          <p className="label">{label ? renderInline(label, ctx) : "Contents"}</p>
+          <ul>
+            {items.map((h) => (
+              <li key={k()} className={`toc-l${h.level}`}>
+                <Link className="anchor" to={`#${h.slug}`} preventScrollReset>
+                  {h.num !== undefined && <span className="toc-num">{String(h.num).padStart(2, "0")}</span>}
+                  <span>{renderInline(h.text, ctx)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
       );
     }
     case "flow": {
