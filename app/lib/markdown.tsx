@@ -9,7 +9,7 @@ export interface RenderVariable {
   description: string;
   page: string;
   blockId: string;
-  local?: boolean;
+  scope?: "global" | "local";
   /** The shadowed global def, when this local one overrides a global. */
   global?: RenderVariable;
 }
@@ -19,7 +19,7 @@ export interface RenderTerm {
   explanation: string;
   page: string;
   blockId: string;
-  local?: boolean;
+  scope?: "global" | "local";
   global?: RenderTerm;
 }
 
@@ -504,7 +504,7 @@ const LINE_TONE_RE = /^::(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
 
 // Mirrors DEF_RE in shared.ts — name, value, description, then the optional
 // "private" flag that keeps the definition out of the All variables index.
-const DEF_INNER_RE = /^\{\{def:(local:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}$/;
+const DEF_INNER_RE = /^\{\{def:(global:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}$/;
 
 /* ---------------------------------------------------------------- */
 /* Chip — the shared primitive for variable & term defs/refs/notes.   */
@@ -621,9 +621,9 @@ function termId(name: string): string {
   return `term-${slugify(name)}`;
 }
 
-/** Parses the inner of a {{TermDef|TermNote|TermRef(...)}} token; strips local:. */
+/** Parses the inner of a {{TermDef|TermNote|TermRef(...)}} token; strips global:. */
 function parseTermToken(token: string): { name: string; explanation: string } {
-  const inner = token.replace(/^\{\{Term(?:Def|Note|Ref)\(/, "").replace(/\)\}\}$/, "").replace(/^local:/, "");
+  const inner = token.replace(/^\{\{Term(?:Def|Note|Ref)\(/, "").replace(/\)\}\}$/, "").replace(/^global:/, "");
   const pipe = inner.indexOf("|");
   return {
     name: (pipe === -1 ? inner : inner.slice(0, pipe)).trim(),

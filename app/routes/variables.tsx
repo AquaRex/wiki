@@ -20,7 +20,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const pages = allPages.filter((p) => pathInProject(p.path, project));
   const variables = variableDefs
     .filter((v) => pathInProject(v.page, project))
-    .sort((a, b) => a.name.localeCompare(b.name) || Number(a.local) - Number(b.local));
+    .sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope));
   return { project, pages, variables };
 }
 

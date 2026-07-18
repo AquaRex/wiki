@@ -42,11 +42,16 @@ export interface VariableDef {
   description: string;
   page: string;
   blockId: string;
-  /** True when defined with `def:local:Name` — visible only on its own page. */
-  local: boolean;
   /**
-   * When a local def shadows a global one of the same name, the global def is
-   * kept here: the local chip hovers/links the global, while refs use the local.
+   * "global" when defined with `def:global:Name` (project-wide, define once);
+   * "local" otherwise (a plain def, scoped to its own page — an override if a
+   * global of the same name exists, else just a page-local variable).
+   */
+  scope: "global" | "local";
+  /**
+   * The shadowed global def, attached to a local def that overrides a global of
+   * the same name: the local chip hovers/links this global, while refs on the
+   * page use the local def.
    */
   global?: VariableDef;
 }
@@ -62,9 +67,9 @@ export interface TermDef {
   explanation: string;
   page: string;
   blockId: string;
-  /** True when defined with `TermDef(local:Name)` — visible only on its own page. */
-  local: boolean;
-  /** The shadowed global term, kept when a local def overrides a global one. */
+  /** "global" when defined with `TermDef(global:Name)`; "local" otherwise. */
+  scope: "global" | "local";
+  /** The shadowed global term, attached when a local def overrides a global. */
   global?: TermDef;
 }
 
@@ -266,13 +271,15 @@ export function blankPage(rawPath: string, title?: string): WikiPage {
 
 /**
  * {{def:name=value|description|custom display}}
- *   - an optional `local:` prefix scopes the def to its own page
- *   - the value may be omitted: {{def:name|description}} declares a global with a
- *     description but no value, a template that pages override with a local value
+ *   - a plain def is page-local: it overrides a global of the same name here, or
+ *     is just a page-local variable if no global exists
+ *   - a `global:` prefix ({{def:global:name=value|desc}}) defines the project-wide
+ *     variable that other pages may override locally
+ *   - the value may be omitted (a name-only global template)
  *   - the optional 4th field overrides how the chip is displayed (inline markup)
  * Refs ({{name}}) resolve by name.
  */
-export const DEF_RE = /\{\{def:(local:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}/g;
+export const DEF_RE = /\{\{def:(global:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}/g;
 
 /** Every variable def across the given pages, in document order. */
 export function collectVariableDefs(pages: WikiPage[]): VariableDef[] {
@@ -286,7 +293,7 @@ export function collectVariableDefs(pages: WikiPage[]): VariableDef[] {
           description: match[4] ?? "",
           page: page.path,
           blockId: block.id,
-          local: Boolean(match[1]),
+          scope: match[1] ? "global" : "local",
         });
       }
     }
@@ -295,11 +302,12 @@ export function collectVariableDefs(pages: WikiPage[]): VariableDef[] {
 }
 
 /**
- * Resolves the variable map as seen from `currentPath`: a page's own local def
- * wins over a global of the same name, and the shadowed global is attached as
- * `.global` so the local chip can still hover/link it. Passing "" (no page)
- * yields the plain global map. Globals are last-wins across pages, matching the
- * previous behaviour.
+ * Resolves the variable map as seen from `currentPath`:
+ *   - a `def:global:` def is visible everywhere in the project;
+ *   - a plain `def:` def is scoped to its own page — it OVERRIDES a global of the
+ *     same name for this page (the shadowed global is kept on `.global` so the
+ *     local chip can still hover/link it), or, with no global, is a page-local.
+ * Passing "" (no page) yields the global-only map.
  */
 export function resolveVariablesForPage(
   defs: VariableDef[],
@@ -309,12 +317,10 @@ export function resolveVariablesForPage(
   const locals: Record<string, VariableDef> = {};
   const here = currentPath.toLowerCase();
   for (const def of defs) {
-    if (def.local) {
-      if (def.page.toLowerCase() === here) {
-        locals[def.name] = def;
-      }
-    } else {
+    if (def.scope === "global") {
       globals[def.name] = def;
+    } else if (def.page.toLowerCase() === here) {
+      locals[def.name] = def;
     }
   }
   const out: Record<string, VariableDef> = { ...globals };
@@ -334,14 +340,14 @@ export function extractVariables(pages: WikiPage[]): Record<string, VariableDef>
  * {{TermNote(Name | explanation)}} — a term with a hover explanation
  * Both register the term so a {{TermRef}} can resolve to it.
  */
-export const TYPEDEF_RE = /\{\{Term(?:Def|Note)\(\s*(local:)?([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^)]*?)\s*)?\)\}\}/g;
+export const TYPEDEF_RE = /\{\{Term(?:Def|Note)\(\s*(global:)?([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^)]*?)\s*)?\)\}\}/g;
 
 export interface RawTermDef {
   name: string;
   explanation: string;
   page: string;
   blockId: string;
-  local: boolean;
+  scope: "global" | "local";
 }
 
 /** Every term def across the given pages, in document order. */
@@ -355,7 +361,7 @@ export function collectTermDefs(pages: WikiPage[]): RawTermDef[] {
           explanation: (match[3] ?? "").trim(),
           page: page.path,
           blockId: block.id,
-          local: Boolean(match[1]),
+          scope: match[1] ? "global" : "local",
         });
       }
     }
@@ -375,7 +381,7 @@ function mergeTerms(defs: RawTermDef[]): Record<string, TermDef> {
     const isBare = !def.explanation;
     const existing = terms[def.name];
     if (!existing) {
-      terms[def.name] = { name: def.name, explanation: def.explanation, page: def.page, blockId: def.blockId, local: def.local };
+      terms[def.name] = { name: def.name, explanation: def.explanation, page: def.page, blockId: def.blockId, scope: def.scope };
       continue;
     }
     terms[def.name] = {
@@ -383,21 +389,21 @@ function mergeTerms(defs: RawTermDef[]): Record<string, TermDef> {
       explanation: def.explanation || existing.explanation,
       page: isBare ? def.page : existing.page,
       blockId: isBare ? def.blockId : existing.blockId,
-      local: def.local,
+      scope: def.scope,
     };
   }
   return terms;
 }
 
 /**
- * Resolves the term map as seen from `currentPath`: a page's own local term wins
- * over a global of the same name, with the shadowed global attached as `.global`.
- * Passing "" yields the plain global map.
+ * Resolves the term map as seen from `currentPath`: a `global:` term is visible
+ * project-wide; a plain term is scoped to its page and overrides a global of the
+ * same name there (shadowed global attached as `.global`). "" yields globals only.
  */
 export function resolveTermsForPage(defs: RawTermDef[], currentPath: string): Record<string, TermDef> {
   const here = currentPath.toLowerCase();
-  const globals = mergeTerms(defs.filter((d) => !d.local));
-  const locals = mergeTerms(defs.filter((d) => d.local && d.page.toLowerCase() === here));
+  const globals = mergeTerms(defs.filter((d) => d.scope === "global"));
+  const locals = mergeTerms(defs.filter((d) => d.scope === "local" && d.page.toLowerCase() === here));
   const out: Record<string, TermDef> = { ...globals };
   for (const [name, local] of Object.entries(locals)) {
     out[name] = globals[name] ? { ...local, global: globals[name] } : local;
@@ -414,8 +420,8 @@ function plainText(markup: string): string {
   return markup
     .replace(/^```.*$/gm, " ")
     .replace(/^:::.*$/gm, " ")
-    .replace(/\{\{Term(?:Def|Note|Ref)\(\s*(?:local:)?([^|)]+?)\s*(?:\|[^)]*)?\)\}\}/g, "$1")
-    .replace(/\{\{def:(?:local:)?([^=|}]+?)\s*(?:=\s*([^|}]*?))?\s*(?:\|([^}]*))?\}\}/g, "$1 $2 $3")
+    .replace(/\{\{Term(?:Def|Note|Ref)\(\s*(?:global:)?([^|)]+?)\s*(?:\|[^)]*)?\)\}\}/g, "$1")
+    .replace(/\{\{def:(?:global:)?([^=|}]+?)\s*(?:=\s*([^|}]*?))?\s*(?:\|([^}]*))?\}\}/g, "$1 $2 $3")
     .replace(/\{\{(-?\d[^|}]*)\|([^}]*)\}\}/g, "$1 $2")
     .replace(/\{\{([^|}]+)\|([^}]*)\}\}/g, "$2")
     .replace(/\{\{([^}]+)\}\}/g, "$1")
