@@ -73,6 +73,51 @@ export interface TermDef {
   global?: TermDef;
 }
 
+/* ------------------------------------------------------------------ */
+/* Roadmap boards (the :::roadmap directive)                            */
+/* ------------------------------------------------------------------ */
+
+/** A card on a roadmap board. All three text fields are wiki markdown. */
+export interface BoardCard {
+  id: string;
+  /** Card heading, shown large on the card. */
+  title: string;
+  /** One-line-ish summary shown under the title on the card face. */
+  desc: string;
+  /** Full detail, shown in the card's fullscreen view. */
+  body: string;
+}
+
+/** A column ("New Tasks", "Ready", …) holding an ordered list of cards. */
+export interface BoardColumn {
+  id: string;
+  title: string;
+  cards: BoardCard[];
+}
+
+/** The whole board, stored as jsonb in the boards table. */
+export interface BoardData {
+  columns: BoardColumn[];
+}
+
+let boardIdCounter = 0;
+/** A short unique id for a card/column, stable within a session. */
+export function newBoardId(prefix: string): string {
+  boardIdCounter += 1;
+  return `${prefix}-${Date.now().toString(36)}-${boardIdCounter.toString(36)}`;
+}
+
+/** The starter board used when a :::roadmap has no saved data yet. */
+export function defaultBoard(): BoardData {
+  return {
+    columns: ["New Tasks", "Ready", "Active", "Review", "Done"].map((title) => ({
+      id: newBoardId("col"),
+      title,
+      cards: [],
+    })),
+  };
+}
+
 export interface SearchResult {
   path: string;
   title: string;

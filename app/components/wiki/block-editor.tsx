@@ -20,6 +20,7 @@ import {
   Image as ImageIcon,
   Info,
   Italic,
+  KanbanSquare,
   Link2,
   List,
   ListOrdered,
@@ -171,6 +172,7 @@ const SNIPPETS: Snippet[] = [
   { label: "Steps", icon: <ListOrdered className="size-3.5" />, text: ":::steps\n- **First step** — what to do and why\n- **Second step** — what to do and why\n:::", block: true },
   { label: "Contents", icon: <List className="size-3.5" />, text: ":::contents On this page\n:::", block: true },
   { label: "Contents mini", icon: <PanelRight className="size-3.5" />, text: ":::contents mini(>) On this page\n:::", block: true },
+  { label: "Roadmap", icon: <KanbanSquare className="size-3.5" />, text: ":::roadmap\n:::", block: true },
   { label: "Blueprint", icon: <GitBranch className="size-3.5" />, text: ":::blueprint\nPaste copied Unreal Blueprint nodes here.\n:::", block: true, wrap: [":::blueprint\n", "\n:::"] },
   { label: "Material", icon: <GitBranch className="size-3.5" />, text: ":::material\nPaste copied Unreal Material nodes here.\n:::", block: true, wrap: [":::material\n", "\n:::"] },
 ];

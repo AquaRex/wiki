@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { UnrealGraph } from "~/components/wiki/unreal-graph";
+import { Roadmap } from "~/components/wiki/roadmap";
 import { openLightbox } from "~/components/wiki/lightbox";
 
 export interface RenderVariable {
@@ -1162,6 +1163,12 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
       // The body is raw Unreal T3D text, kept verbatim so it round-trips back
       // into the editor. UnrealGraph only reads it to draw.
       return <UnrealGraph key={k()} source={body.join("\n")} />;
+    }
+    // A Trello-style board. `dir.param` is an optional board key so one page can
+    // hold several boards; the board's data lives in its own table row, keyed by
+    // page + key, loaded after the page (RLS withholds a private page's board).
+    case "roadmap": {
+      return <Roadmap key={k()} pagePath={ctx.currentPath} boardKey={dir.param} ctx={ctx} />;
     }
     case "infobox": {
       // The title may carry an image-style pin token — `:::infobox Name >v` —

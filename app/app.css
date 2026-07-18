@@ -1496,3 +1496,273 @@
   border-radius: 6px;
   pointer-events: none;
 }
+
+/* ------------------------------------------------------------------ */
+/* :::roadmap — a Trello-style board                                    */
+/* ------------------------------------------------------------------ */
+.wiki .roadmap {
+  position: relative;
+  margin: 24px 0;
+}
+.wiki .roadmap-empty {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 16px;
+}
+.wiki .roadmap-cols {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.wiki .roadmap-col {
+  flex: 0 0 260px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  max-height: 640px;
+}
+.wiki .roadmap-col.drag-over {
+  border-color: var(--waccent);
+  box-shadow: 0 0 0 1px var(--accent-line);
+}
+.wiki .roadmap-col-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--wborder);
+}
+.wiki .roadmap-grip {
+  display: inline-flex;
+  color: var(--text-faint);
+  cursor: grab;
+  flex: none;
+}
+.wiki .roadmap-grip svg {
+  width: 14px;
+  height: 14px;
+}
+.wiki .roadmap-col-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--waccent);
+  font-weight: 600;
+  flex: 1;
+}
+.wiki .roadmap-col-title-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--waccent);
+  font-weight: 600;
+}
+.wiki .roadmap-col-title-input:focus {
+  border-bottom: 1px solid var(--accent-line);
+}
+.wiki .roadmap-col-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  flex: none;
+}
+.wiki .roadmap-col-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  overflow-y: auto;
+  min-height: 40px;
+}
+.wiki .roadmap-card {
+  position: relative;
+  background: var(--code-bg);
+  border: 1px solid var(--wborder);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  box-shadow: var(--card-shadow);
+}
+.wiki .roadmap-card:hover {
+  border-color: var(--accent-line);
+}
+.wiki .roadmap-card[draggable="true"] {
+  cursor: grab;
+}
+.wiki .roadmap-card-title {
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--text);
+}
+.wiki .roadmap-card-title p,
+.wiki .roadmap-card-desc p {
+  margin: 0;
+}
+.wiki .roadmap-card-desc {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.wiki .roadmap-card img {
+  border-radius: 6px;
+  max-width: 100%;
+}
+.wiki .roadmap-card-tools {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: none;
+  gap: 2px;
+}
+.wiki .roadmap-card:hover .roadmap-card-tools {
+  display: flex;
+}
+.wiki .roadmap-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: var(--surface);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.wiki .roadmap-icon-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.wiki .roadmap-icon-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.wiki .roadmap-add-card,
+.wiki .roadmap-add-col {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px dashed var(--wborder);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.wiki .roadmap-add-card:hover,
+.wiki .roadmap-add-col:hover {
+  border-color: var(--accent-line);
+  color: var(--waccent);
+}
+.wiki .roadmap-add-col {
+  flex: 0 0 200px;
+  align-self: flex-start;
+  justify-content: center;
+}
+.wiki .roadmap-add-card svg,
+.wiki .roadmap-add-col svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Fullscreen card view — fills the viewport, X in its own top-right. */
+.wiki .roadmap-fullcard {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--background);
+  overflow-y: auto;
+  padding: 48px max(24px, 6vw) 80px;
+}
+.wiki .roadmap-fullcard-close {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  z-index: 61;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.wiki .roadmap-fullcard-close:hover {
+  border-color: var(--waccent);
+  color: var(--text);
+}
+.wiki .roadmap-fullcard-close svg {
+  width: 18px;
+  height: 18px;
+}
+.wiki .roadmap-fullcard-inner {
+  max-width: var(--measure);
+  margin: 0 auto;
+}
+.wiki .roadmap-fullcard-title {
+  font-size: 30px;
+  font-weight: 680;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+.wiki .roadmap-fullcard-title p {
+  margin: 0;
+}
+.wiki .roadmap-fullcard-desc {
+  font-size: 17px;
+  color: var(--text-dim);
+  margin-bottom: 24px;
+}
+.wiki .roadmap-card-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.wiki .roadmap-card-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wiki .roadmap-card-editor label span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+.wiki .roadmap-card-editor input,
+.wiki .roadmap-card-editor textarea {
+  width: 100%;
+  background: var(--code-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  resize: vertical;
+}
+.wiki .roadmap-card-editor input:focus,
+.wiki .roadmap-card-editor textarea:focus {
+  outline: none;
+  border-color: var(--waccent);
+}

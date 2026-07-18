@@ -5,6 +5,7 @@ import {
   collectTermDefs,
   collectVariableDefs,
   emptyProjectMeta,
+  type BoardData,
   extractTerms,
   extractVariables,
   isRelLocked,
@@ -45,6 +46,10 @@ export interface WikiStore {
   /** Raw def lists (globals and locals) for per-page scope resolution. */
   getVariableDefs(): Promise<VariableDef[]>;
   getTermDefs(): Promise<RawTermDef[]>;
+  /** A :::roadmap board's saved data, or null if it has never been saved. */
+  getBoard(pagePath: string, boardKey: string): Promise<BoardData | null>;
+  /** Saves a roadmap board (signed-in only, refused on a locked/withheld page). */
+  saveBoard(pagePath: string, boardKey: string, data: BoardData): Promise<void>;
   search(query: string): Promise<SearchResult[]>;
   /**
    * Verifies a locked page's password server-side and, on success, returns the
@@ -437,6 +442,45 @@ class SupabaseStore implements WikiStore {
   async getTermDefs() {
     const pages = await this.pages();
     return collectTermDefs(Array.from(pages.values()));
+  }
+
+  async getBoard(pagePath: string, boardKey: string): Promise<BoardData | null> {
+    const { project, rel } = splitPath(normalizePath(pagePath));
+    const { data, error } = await supabase
+      .from("boards")
+      .select("data")
+      .eq("project_slug", project)
+      .eq("rel", rel)
+      .eq("board_key", boardKey)
+      .maybeSingle();
+    fail("Could not load board", error);
+    return (data?.data as BoardData) ?? null;
+  }
+
+  async saveBoard(pagePath: string, boardKey: string, board: BoardData): Promise<void> {
+    const page = await this.getPage(pagePath);
+    if (!page) {
+      throw new Error(`Page not found: ${pagePath}`);
+    }
+    // A locked page's body was withheld; block board writes until it's unlocked,
+    // matching updatePage — otherwise a board could be saved against blanked content.
+    if (page.locked) {
+      throw new Error("This page is locked — unlock it before editing its board.");
+    }
+    const { project, rel } = splitPath(normalizePath(pagePath));
+    const { error } = await supabase.from("boards").upsert(
+      {
+        project_slug: project,
+        rel,
+        board_key: boardKey,
+        data: board,
+        // Mirror the page's privacy so a private page's board isn't sent to anons.
+        is_private: page.access !== "public",
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "project_slug,rel,board_key" }
+    );
+    fail("Could not save board", error);
   }
 
   async search(query: string) {
