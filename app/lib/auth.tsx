@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import { getStore } from "./store";
 
 interface AuthState {
   /** True when a Supabase session exists — grants read access to private rows. */
@@ -54,8 +55,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(data.session);
       setReady(true);
     });
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
+      // The page cache depends on who's asking (a locked body is sent to signed-in
+      // users, withheld from anonymous ones), so drop it on any sign-in/out so the
+      // next read reflects the new identity.
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+        getStore().invalidate();
+      }
     });
     return () => data.subscription.unsubscribe();
   }, []);

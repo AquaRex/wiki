@@ -181,6 +181,38 @@ const CODE_KEYWORDS = new Set(
   ).split(" ")
 );
 
+/**
+ * A raw, verbatim text block — like a code block but with no markdown parsing,
+ * no syntax highlighting, and a "Copy all" button. Delimited by a `~~~` fence so
+ * the content may freely contain backticks (```), colons, or other markup that
+ * would otherwise break a normal code fence.
+ */
+function RawBlock({ text, label }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        /* clipboard blocked — ignore */
+      });
+  };
+  return (
+    <div className="code raw">
+      <div className="file">
+        <span>{label || "TEXT"}</span>
+        <button type="button" className="raw-copy" onClick={copy}>
+          {copied ? "Copied" : "Copy all"}
+        </button>
+      </div>
+      <pre>{text}</pre>
+    </div>
+  );
+}
+
 /** Splits a line into keyword / comment / plain runs. */
 function highlightCode(text: string): React.ReactNode {
   const out: React.ReactNode[] = [];
@@ -889,6 +921,29 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       continue;
     }
 
+    // Raw verbatim block: `~~~` (optionally `~~~~`… for content containing ~~~).
+    // No markdown, no highlighting; closes on a fence at least as long as it
+    // opened, so the body may contain backticks and other markup safely.
+    const rawFence = /^(~{3,})[ \t]*(.*)$/.exec(line);
+    if (rawFence) {
+      const fence = rawFence[1];
+      const label = rawFence[2].trim();
+      const rawLines: string[] = [];
+      i++;
+      const closeRe = new RegExp(`^~{${fence.length},}\\s*$`);
+      while (i < lines.length && !closeRe.test(lines[i])) {
+        rawLines.push(lines[i]);
+        i++;
+      }
+      i++;
+      out.push(
+        <React.Fragment key={bk("raw", rawLines.join("\n"))}>
+          <RawBlock text={rawLines.join("\n")} label={label || undefined} />
+        </React.Fragment>
+      );
+      continue;
+    }
+
     if (line.startsWith("```")) {
       const spec = line.slice(3).trim();
       const [lang, file] = spec.includes(":") ? [spec.split(":")[0], spec.split(":").slice(1).join(":")] : [spec, ""];
@@ -1131,7 +1186,7 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       lines[i].trim() &&
       // "::" opens or closes a tone region and ends the paragraph; a bare
       // ":" (the inline tone marker) does not.
-      !/^(```|:::|::(?:error|warn|good|tips|muted)\b|::\s*$|#|\^ |>|\||\s*[-*]\s|\s*\d+\.\s|!\[|-{3,}\s*$|\*{3,}\s*$)/.test(
+      !/^(```|~{3,}|:::|::(?:error|warn|good|tips|muted)\b|::\s*$|#|\^ |>|\||\s*[-*]\s|\s*\d+\.\s|!\[|-{3,}\s*$|\*{3,}\s*$)/.test(
         lines[i].trim()
       )
     ) {

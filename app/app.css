@@ -321,6 +321,29 @@
   text-transform: uppercase;
   font-size: 10.5px;
 }
+/* Raw verbatim block — plain text, no highlighting, with a Copy-all button. */
+.wiki .code.raw {
+  border-left-color: var(--border-strong);
+}
+.wiki .code.raw pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wiki .raw-copy {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--waccent);
+  border: 1px solid var(--accent-line);
+  border-radius: 5px;
+  padding: 2px 9px;
+  cursor: pointer;
+  background: transparent;
+}
+.wiki .raw-copy:hover {
+  background: var(--accent-soft);
+}
 .wiki pre {
   margin: 0;
   padding: 16px;

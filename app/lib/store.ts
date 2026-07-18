@@ -171,6 +171,12 @@ class SupabaseStore implements WikiStore {
     if (!page) {
       throw new Error(`Page not found: ${rawPath}`);
     }
+    // A locked page's body was withheld by the server (blank header/lede/blocks).
+    // Saving that would overwrite the real content with blanks — so refuse until
+    // it has been unlocked, which fills the body back in.
+    if (page.locked) {
+      throw new Error("This page is locked — unlock it before editing.");
+    }
     const copy: WikiPage = JSON.parse(JSON.stringify(page));
     mutate(copy);
     await this.writePage(copy);
