@@ -495,6 +495,9 @@
 .wiki .tone-muted {
   color: var(--text-faint);
 }
+.wiki .tone-white {
+  color: #fff;
+}
 
 /* Icon callouts: :::error, :::warn, :::good, :::tips */
 .wiki .callout-box {
@@ -852,58 +855,64 @@
 }
 
 /* Variable definitions and references */
-.wiki .vardef {
+/* Chips — the shared box for every variable/term def, ref and note. All share
+   one look; variants only tweak colour. A chip that links (ref) is an <a>. */
+.wiki .chip {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-line);
   border-radius: 5px;
   padding: 2px 8px;
-  color: var(--waccent);
   font-weight: 600;
   white-space: nowrap;
-  scroll-margin-top: 100px;
-}
-.wiki .vardef .val {
-  color: var(--text);
-  font-weight: 500;
-}
-.wiki .magicval {
-  font-family: var(--font-mono);
-  font-size: 0.85em;
-  background: var(--surface-2);
-  border: 1px solid var(--accent-line);
-  border-radius: 5px;
-  padding: 1px 6px;
-  color: var(--waccent);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.wiki .magicval[title] {
-  cursor: help;
-  border-bottom-style: dotted;
-}
-.wiki a.varref {
-  color: var(--waccent);
   text-decoration: none;
-  border-bottom: 1px dotted var(--accent-line);
+  scroll-margin-top: 100px;
+  position: relative;
+  display: inline;
+}
+/* Orange chips: variable def/ref, magic value, term note/ref. */
+.wiki .vardef,
+.wiki .varref,
+.wiki .magicval,
+.wiki .termnote,
+.wiki .termref {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--waccent);
+}
+.wiki a.varref:hover,
+.wiki a.termref:hover,
+.wiki .termnote:hover {
+  border-color: var(--waccent);
   cursor: pointer;
 }
-.wiki a.varref:hover {
-  background: var(--accent-soft);
-  border-bottom-style: solid;
+.wiki .termnote,
+.wiki .magicval[title] {
+  cursor: help;
 }
-.wiki a.varref .mono-val {
-  font-family: var(--font-mono);
-  font-size: 0.85em;
+/* The value after "=" in a VarDef is white by default (just inline formatting). */
+.wiki .vardef .val {
+  color: #fff;
+  font-weight: 500;
 }
-.wiki a.varref code,
+/* Neutral term-definition chip (dark slate). */
+.wiki .termdef {
+  background: #1c222c;
+  border: 1px solid var(--border-strong);
+  color: #e6e9ee;
+}
+/* An undefined variable/term ref — a dashed red chip, no link. */
+.wiki .varref.missing,
+.wiki .termref.missing {
+  background: transparent;
+  color: var(--crit);
+  border: 1px dashed var(--crit);
+  cursor: help;
+}
 .wiki a.coderef code {
   color: var(--waccent);
   border-color: var(--accent-line);
   cursor: pointer;
 }
-.wiki a.varref code:hover,
 .wiki a.coderef code:hover {
   background: var(--accent-soft);
 }
@@ -912,51 +921,6 @@
   border-bottom: none;
 }
 
-/* Term definition ({{TypeDef}}) — a neutral boxed tag (dark slate), distinct
-   from the orange variable/reference boxes. */
-.wiki .termdef {
-  font-family: var(--font-mono);
-  font-size: 0.85em;
-  background: #1c222c;
-  border: 1px solid var(--border-strong);
-  border-radius: 5px;
-  padding: 2px 8px;
-  color: #e6e9ee;
-  font-weight: 600;
-  white-space: nowrap;
-  scroll-margin-top: 100px;
-}
-/* Term reference and note — the orange VarDef box look (border, accent bg, text).
-   A note additionally pops a styled overlay on hover. */
-.wiki .termref,
-.wiki .termnote {
-  font-family: var(--font-mono);
-  font-size: 0.85em;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-line);
-  border-radius: 5px;
-  padding: 2px 8px;
-  color: var(--waccent);
-  font-weight: 600;
-  white-space: nowrap;
-  text-decoration: none;
-  cursor: pointer;
-  position: relative;
-}
-.wiki .termref:hover,
-.wiki .termnote:hover {
-  border-color: var(--waccent);
-}
-.wiki .termnote {
-  cursor: help;
-}
-.wiki .termref.missing {
-  background: transparent;
-  color: var(--crit);
-  border-color: var(--crit);
-  border-style: dashed;
-  cursor: help;
-}
 /* The shared hover card used by every def/ref (variables and terms). Orange
    border, fixed dark background (#1c222c) so text reads in both themes,
    positioned at the cursor (fixed = viewport coords). Its content is fully

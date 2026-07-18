@@ -289,11 +289,11 @@ export function extractVariables(pages: WikiPage[]): Record<string, VariableDef>
 }
 
 /**
- * {{TypeDef(Name)}}                — a bare term anchor (jump target)
- * {{TypeNote(Name | explanation)}} — a term with a hover explanation
- * Both register the term so a {{TypeRef}} can resolve to it.
+ * {{TermDef(Name)}}                — a bare term anchor (jump target)
+ * {{TermNote(Name | explanation)}} — a term with a hover explanation
+ * Both register the term so a {{TermRef}} can resolve to it.
  */
-export const TYPEDEF_RE = /\{\{Type(?:Def|Note)\(\s*([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^)]*?)\s*)?\)\}\}/g;
+export const TYPEDEF_RE = /\{\{Term(?:Def|Note)\(\s*([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^)]*?)\s*)?\)\}\}/g;
 
 /**
  * Collects every term across all pages, keyed by name. A BARE definition is the
@@ -332,7 +332,7 @@ function plainText(markup: string): string {
   return markup
     .replace(/^```.*$/gm, " ")
     .replace(/^:::.*$/gm, " ")
-    .replace(/\{\{Type(?:Def|Note|Ref)\(\s*([^|)]+?)\s*(?:\|[^)]*)?\)\}\}/g, "$1")
+    .replace(/\{\{Term(?:Def|Note|Ref)\(\s*([^|)]+?)\s*(?:\|[^)]*)?\)\}\}/g, "$1")
     .replace(/\{\{def:([^=}]+)=([^|}]*?)\s*(?:\|([^}]*))?\}\}/g, "$1 = $2 $3")
     .replace(/\{\{(-?\d[^|}]*)\|([^}]*)\}\}/g, "$1 $2")
     .replace(/\{\{([^|}]+)\|([^}]*)\}\}/g, "$2")

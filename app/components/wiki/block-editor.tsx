@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { renderMarkdown, countH2, type RenderContext } from "~/lib/markdown";
-import { newBlockId, type WikiBlock, type WikiPage } from "~/lib/shared";
+import { extractTerms, extractVariables, newBlockId, type WikiBlock, type WikiPage } from "~/lib/shared";
 import { getStore } from "~/lib/store";
 
 type Segment =
@@ -124,11 +124,10 @@ const SNIPPETS: Snippet[] = [
   { label: "Link", icon: <Link2 className="size-3.5" />, text: "[label](https://example.com)", wrap: ["[", "](https://example.com)"] },
   { label: "Head image", icon: <ImageIcon className="size-3.5" />, text: "## Section title ![](/uploads/icon.png)", block: true },
   { label: "Var def", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What this variable controls}}" },
-  { label: "Private var", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What it controls|private}}" },
-  { label: "Var ref", icon: <Braces className="size-3.5" />, text: "{{varName|shown text}}" },
-  { label: "Term def", icon: <Braces className="size-3.5" />, text: "{{TypeDef(Hearing)}}" },
-  { label: "Term note", icon: <Braces className="size-3.5" />, text: "{{TypeNote(Hearing|A **formatted** explanation shown on hover)}}" },
-  { label: "Term ref", icon: <Braces className="size-3.5" />, text: "{{TypeRef(Hearing)}}" },
+  { label: "Var ref", icon: <Braces className="size-3.5" />, text: "{{varName}}" },
+  { label: "Term def", icon: <Braces className="size-3.5" />, text: "{{TermDef(Hearing)}}" },
+  { label: "Term note", icon: <Braces className="size-3.5" />, text: "{{TermNote(Hearing|A **formatted** explanation shown on hover)}}" },
+  { label: "Term ref", icon: <Braces className="size-3.5" />, text: "{{TermRef(Hearing)}}" },
   { label: "Value", icon: <Braces className="size-3.5" />, text: "{{0.57|why this value}}" },
   { label: "Code block", icon: <Code2 className="size-3.5" />, text: "```csharp:EnemyAI.cs\n// code here\n```", block: true },
   { label: "Raw text", icon: <FileText className="size-3.5" />, text: "~~~ Label\nPaste raw text here — backticks and any markup are shown verbatim.\n~~~", block: true, wrap: ["~~~\n", "\n~~~"] },
@@ -378,6 +377,29 @@ function BlockEditorPanel({
   const [showAll, setShowAll] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  // The live preview merges variable/term definitions from the CURRENT draft into
+  // the page's registry, so a def and its reference written in the same edit
+  // resolve immediately instead of appearing "undefined" until the page is saved.
+  const previewCtx = useMemo<RenderContext>(() => {
+    const draftPage: WikiPage = {
+      path: ctx.currentPath,
+      title: "",
+      header: "",
+      eyebrow: "",
+      lede: "",
+      tags: [],
+      blocks: [{ id: block.id, text: draft }],
+      updated: "",
+      access: "public",
+      locked: false,
+    };
+    return {
+      ...ctx,
+      variables: { ...ctx.variables, ...extractVariables([draftPage]) },
+      terms: { ...(ctx.terms ?? {}), ...extractTerms([draftPage]) },
+    };
+  }, [ctx, draft, block.id]);
   const { mutate, busy } = useMutatePage(pagePath);
 
   // A pasted Unreal graph is thousands of characters long. Let the textarea grow
@@ -535,7 +557,7 @@ function BlockEditorPanel({
     return (
       <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
         <div className="wiki border-b border-border px-5 pb-4 pt-1">
-          {renderMarkdown(draft, ctx, h2Start)}
+          {renderMarkdown(draft, previewCtx, h2Start)}
           <div className="clear-both" />
         </div>
         <SegmentedEditor draft={draft} onChange={setDraft} onSave={save} onCancel={onClose} />
@@ -559,7 +581,7 @@ function BlockEditorPanel({
   return (
     <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
       <div ref={previewRef} className="wiki border-b border-border px-5 pb-4 pt-1">
-        {renderMarkdown(draft, ctx, h2Start)}
+        {renderMarkdown(draft, previewCtx, h2Start)}
         <div className="clear-both" />
       </div>
       <div className="border-b border-border bg-surface-2 px-2 py-1.5">

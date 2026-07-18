@@ -447,9 +447,9 @@ const INLINE_SRC = [
     "(`[^`]+`)", // 1 code
     "(\\{\\{def:[^}]+\\}\\})", // 2 variable definition
     "(\\{\\{-?\\d[^|}]*(?:\\|[^}]*)?\\}\\})", // 3 magic value (starts with a digit — names can't)
-    "(\\{\\{TypeDef\\([^)]*\\)\\}\\})", // 4 term definition
-    "(\\{\\{TypeNote\\([^)]*\\)\\}\\})", // 5 term note (with hover explanation)
-    "(\\{\\{TypeRef\\([^)]*\\)\\}\\})", // 6 term reference
+    "(\\{\\{TermDef\\([^)]*\\)\\}\\})", // 4 term definition
+    "(\\{\\{TermNote\\([^)]*\\)\\}\\})", // 5 term note (with hover explanation)
+    "(\\{\\{TermRef\\([^)]*\\)\\}\\})", // 6 term reference
     "(\\{\\{[A-Za-z0-9_.-]+(?:\\|[^}]*)?\\}\\})", // 7 variable reference
     "(\\[\\[[^\\]]+\\]\\])", // 8 wiki link
     "(!\\[[^\\]]*\\]\\([^)]+\\)(?:\\{[^}]*\\})?)", // 9 image (optional {w=…} size)
@@ -457,7 +457,8 @@ const INLINE_SRC = [
     "(\\*\\*.+?\\*\\*)", // 11 bold
     "(\\*[^*\\n]+\\*)", // 12 italic
     "(==[^=]+==)", // 13 accent term
-    "((?<!:):(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 14 coloured inline run
+    "(:(?:error|warn|good|tips|muted|white)\\[[^\\]]*\\])", // 14 coloured span :tone[text]
+    "((?<!:):(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 15 coloured inline run (to line end)
 ].join("|");
 
 /** ":error text" — colour only, to end of line. */
@@ -470,67 +471,36 @@ const LINE_TONE_RE = /^::(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
 // "private" flag that keeps the definition out of the All variables index.
 const DEF_INNER_RE = /^\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}$/;
 
-function variableLink(ctx: RenderContext, name: string, label: React.ReactNode): React.ReactNode {
-  const def = ctx.variables[name];
-  if (!def) {
-    return null;
-  }
-  // The hover card shows the value and (formatted) description.
-  const description = `**${def.name}** = \`${def.value}\`${def.description ? ` — ${def.description}` : ""}`;
-  const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
-  return (
-    <HoverCard
-      key={k()}
-      ctx={ctx}
-      description={description}
-      className="varref"
-      to={`/${def.page}#var-${name}`}
-      preventScrollReset={samePage}
-    >
-      {label}
-    </HoverCard>
-  );
-}
+/* ---------------------------------------------------------------- */
+/* Chip — the shared primitive for variable & term defs/refs/notes.   */
+/*                                                                    */
+/* Every one is a boxed label, optionally a link to its definition,   */
+/* optionally with a formatted hover card. Both the label and the     */
+/* card description accept full inline markup, so "value in white",   */
+/* coloured runs, code, etc. all just work. The specific tokens below */
+/* are thin wrappers that decide the label, link target and variant.  */
+/* ---------------------------------------------------------------- */
 
-/** term id anchors are slugified so a TypeRef can jump to them. */
-function termId(name: string): string {
-  return `term-${slugify(name)}`;
-}
-
-/** Parses the inner of a {{TypeDef|TypeNote|TypeRef(...)}} token. */
-function parseTypeToken(token: string): { name: string; explanation: string } {
-  const inner = token.replace(/^\{\{Type(?:Def|Note|Ref)\(/, "").replace(/\)\}\}$/, "");
-  const pipe = inner.indexOf("|");
-  return {
-    name: (pipe === -1 ? inner : inner.slice(0, pipe)).trim(),
-    explanation: pipe === -1 ? "" : inner.slice(pipe + 1).trim(),
-  };
-}
-
-/**
- * The shared hover overlay used by every definition/reference (variables and
- * terms). Wraps a trigger element; while hovered it shows a card at the cursor
- * whose `description` is rendered with full inline formatting. `as` selects the
- * trigger tag ("span" for a def, Link for a reference).
- */
-function HoverCard({
+function Chip({
   ctx,
+  variant,
+  label,
   description,
-  className,
   id,
   to,
   preventScrollReset,
-  children,
 }: {
   ctx: RenderContext;
-  /** Markdown for the card; empty means no card (plain trigger). */
-  description: string;
-  className: string;
+  /** Style variant class, e.g. "vardef", "termref". */
+  variant: string;
+  /** The chip's visible label — already-rendered inline nodes. */
+  label: React.ReactNode;
+  /** Markdown for the hover card; empty means no card. */
+  description?: string;
   id?: string;
-  /** When set, the trigger is a router Link to this path. */
+  /** When set, the chip is a link to this path. */
   to?: string;
   preventScrollReset?: boolean;
-  children: React.ReactNode;
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const hoverProps = description
@@ -545,69 +515,103 @@ function HoverCard({
       <span className="wiki">{renderInline(description, ctx)}</span>
     </span>
   );
+  const cls = `chip ${variant}`;
   if (to) {
     return (
-      <Link className={className} id={id} to={to} preventScrollReset={preventScrollReset} {...hoverProps}>
-        {children}
+      <Link className={cls} id={id} to={to} preventScrollReset={preventScrollReset} {...hoverProps}>
+        {label}
         {card}
       </Link>
     );
   }
   return (
-    <span className={className} id={id} {...hoverProps}>
-      {children}
+    <span className={cls} id={id} {...hoverProps}>
+      {label}
       {card}
     </span>
   );
 }
 
-// A term definition ({{TypeDef(Name)}}) — a neutral boxed anchor. Notes are a
-// separate token (TypeNote), so a def never carries an explanation.
-function renderTypeDef(_ctx: RenderContext, token: string): React.ReactNode {
-  const { name } = parseTypeToken(token);
+/** Variable references become a link chip showing just the name. */
+function variableLink(ctx: RenderContext, name: string, label: React.ReactNode): React.ReactNode {
+  const def = ctx.variables[name];
+  if (!def) {
+    return null;
+  }
+  // The card shows the value and (formatted) description; the value renders white.
+  const description = `**${def.name}** = :white[${def.value}]${def.description ? ` — ${def.description}` : ""}`;
+  const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
   return (
-    <span key={k()} className="termdef" id={termId(name)}>
-      {name}
-    </span>
+    <Chip
+      key={k()}
+      ctx={ctx}
+      variant="varref"
+      label={label}
+      description={description}
+      to={`/${def.page}#var-${name}`}
+      preventScrollReset={samePage}
+    />
   );
 }
 
-// A term note ({{TypeNote(Name|explanation)}}) — reads like a reference box and
-// shows its explanation in the hover card. It's also an anchor a ref can target.
-function renderTypeNote(ctx: RenderContext, token: string): React.ReactNode {
-  const { name, explanation } = parseTypeToken(token);
+/** Term id anchors are slugified so a TermRef can jump to them. */
+function termId(name: string): string {
+  return `term-${slugify(name)}`;
+}
+
+/** Parses the inner of a {{TermDef|TermNote|TermRef(...)}} token. */
+function parseTermToken(token: string): { name: string; explanation: string } {
+  const inner = token.replace(/^\{\{Term(?:Def|Note|Ref)\(/, "").replace(/\)\}\}$/, "");
+  const pipe = inner.indexOf("|");
+  return {
+    name: (pipe === -1 ? inner : inner.slice(0, pipe)).trim(),
+    explanation: pipe === -1 ? "" : inner.slice(pipe + 1).trim(),
+  };
+}
+
+// {{TermDef(Name)}} — a neutral boxed anchor. Notes are a separate token.
+function renderTermDef(ctx: RenderContext, token: string): React.ReactNode {
+  const { name } = parseTermToken(token);
+  return <Chip key={k()} ctx={ctx} variant="termdef" label={renderInline(name, ctx)} id={termId(name)} />;
+}
+
+// {{TermNote(Name|explanation)}} — an anchor that shows its explanation on hover.
+function renderTermNote(ctx: RenderContext, token: string): React.ReactNode {
+  const { name, explanation } = parseTermToken(token);
   return (
-    <HoverCard key={k()} ctx={ctx} description={explanation} className="termnote" id={termId(name)}>
-      {name}
-    </HoverCard>
+    <Chip
+      key={k()}
+      ctx={ctx}
+      variant="termnote"
+      label={renderInline(name, ctx)}
+      description={explanation}
+      id={termId(name)}
+    />
   );
 }
 
-// A term reference ({{TypeRef(Name)}} or {{TypeRef(Name|own description)}}). Links
-// to the term's definition; the hover card shows the ref's own description if it
-// has one, else the definition's explanation.
-function renderTypeRef(ctx: RenderContext, token: string): React.ReactNode {
-  const { name, explanation } = parseTypeToken(token);
+// {{TermRef(Name)}} or {{TermRef(Name|own description)}} — a link chip to the def.
+function renderTermRef(ctx: RenderContext, token: string): React.ReactNode {
+  const { name, explanation } = parseTermToken(token);
   const def = ctx.terms?.[name];
   if (!def) {
     return (
-      <span key={k()} className="termref missing" title={`Undefined term: ${name}`}>
+      <span key={k()} className="chip termref missing" title={`Undefined term: ${name}`}>
         {name}
       </span>
     );
   }
   const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
   return (
-    <HoverCard
+    <Chip
       key={k()}
       ctx={ctx}
+      variant="termref"
+      label={renderInline(name, ctx)}
       description={explanation || def.explanation}
-      className="termref"
       to={`/${def.page}#${termId(name)}`}
       preventScrollReset={samePage}
-    >
-      {name}
-    </HoverCard>
+    />
   );
 }
 
@@ -696,10 +700,15 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
     } else if (m[2]) {
       const dm = DEF_INNER_RE.exec(token);
       if (dm) {
+        // A VarDef is a chip whose label is "name = value" — the value in white
+        // is just default formatting; the label accepts any inline markup.
+        const label = (
+          <>
+            {renderInline(dm[1], ctx)} = <span className="val">{renderInline(dm[2], ctx)}</span>
+          </>
+        );
         out.push(
-          <HoverCard key={k()} ctx={ctx} description={dm[3] || ""} className="vardef" id={`var-${dm[1]}`}>
-            {dm[1]} = <span className="val">{dm[2]}</span>
-          </HoverCard>
+          <Chip key={k()} ctx={ctx} variant="vardef" label={label} description={dm[3] || ""} id={`var-${dm[1]}`} />
         );
       } else {
         out.push(token);
@@ -710,19 +719,17 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
       const value = (pipe === -1 ? inner : inner.slice(0, pipe)).trim();
       const note = pipe === -1 ? "" : inner.slice(pipe + 1).trim();
       out.push(
-        <HoverCard key={k()} ctx={ctx} description={note} className="magicval">
-          {value}
-        </HoverCard>
+        <Chip key={k()} ctx={ctx} variant="magicval" label={renderInline(value, ctx)} description={note} />
       );
     } else if (m[4]) {
-      // {{TypeDef(Name)}} — a bare term anchor.
-      out.push(renderTypeDef(ctx, token));
+      // {{TermDef(Name)}} — a bare term anchor.
+      out.push(renderTermDef(ctx, token));
     } else if (m[5]) {
-      // {{TypeNote(Name|explanation)}} — term with a hover explanation.
-      out.push(renderTypeNote(ctx, token));
+      // {{TermNote(Name|explanation)}} — term with a hover explanation.
+      out.push(renderTermNote(ctx, token));
     } else if (m[6]) {
-      // {{TypeRef(Name)}} — links to the term's definition.
-      out.push(renderTypeRef(ctx, token));
+      // {{TermRef(Name)}} — links to the term's definition.
+      out.push(renderTermRef(ctx, token));
     } else if (m[7]) {
       const inner = token.slice(2, -2);
       const pipe = inner.indexOf("|");
@@ -732,8 +739,9 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
       if (link) {
         out.push(link);
       } else {
+        // Unknown variable — a plain dashed-red chip, no link.
         out.push(
-          <span key={k()} className="varref" style={{ borderBottomStyle: "dashed", color: "var(--crit)" }} title={`Undefined variable: ${name}`}>
+          <span key={k()} className="chip varref missing" title={`Undefined variable: ${name}`}>
             {label}
           </span>
         );
@@ -775,7 +783,15 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
         </em>
       );
     } else if (m[14]) {
-      // Colour only — the rest of the run keeps its own formatting.
+      // :tone[text] — colours just the bracketed text, formatting preserved.
+      const tm = /^:(\w+)\[([\s\S]*)\]$/.exec(token)!;
+      out.push(
+        <span key={k()} className={`tone-${tm[1]}`}>
+          {renderInline(tm[2], ctx)}
+        </span>
+      );
+    } else if (m[15]) {
+      // :tone … — colours the rest of the run.
       const tm = INLINE_TONE_RE.exec(token)!;
       out.push(
         <span key={k()} className={`tone-${tm[1]}`}>
