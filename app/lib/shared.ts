@@ -77,21 +77,48 @@ export interface TermDef {
 /* Roadmap boards (the :::roadmap directive)                            */
 /* ------------------------------------------------------------------ */
 
-/** A card on a roadmap board. All three text fields are wiki markdown. */
+/** An activity-log entry on a card: who did what, when. */
+export interface BoardActivity {
+  /** Author identity — the email prefix of the signed-in user. */
+  who: string;
+  /** Human-readable event, e.g. "moved to Active" or "set the due date". */
+  what: string;
+  /** ISO timestamp. */
+  at: string;
+}
+
+/** A comment left on a card by a signed-in editor. */
+export interface BoardComment {
+  id: string;
+  who: string;
+  /** Markdown comment body. */
+  text: string;
+  at: string;
+}
+
+/** A card on a roadmap board. Text fields are wiki markdown. */
 export interface BoardCard {
   id: string;
-  /** Card heading, shown large on the card. */
+  /** Card heading, shown large on the card face. */
   title: string;
-  /** One-line-ish summary shown under the title on the card face. */
-  desc: string;
-  /** Full detail, shown in the card's fullscreen view. */
+  /** Full detail, shown/edited in the card's fullscreen view. */
   body: string;
+  /** Free-text assignee names (no account validation). */
+  assignees?: string[];
+  /** Optional due date, ISO yyyy-mm-dd. */
+  due?: string;
+  /** Chronological activity log. */
+  activity?: BoardActivity[];
+  /** Discussion thread. */
+  comments?: BoardComment[];
 }
 
 /** A column ("New Tasks", "Ready", …) holding an ordered list of cards. */
 export interface BoardColumn {
   id: string;
   title: string;
+  /** Wiki tone driving the status dot on this column's cards; "" for none. */
+  tone?: "error" | "warn" | "good" | "tips" | "muted" | "";
   cards: BoardCard[];
 }
 
@@ -109,12 +136,15 @@ export function newBoardId(prefix: string): string {
 
 /** The starter board used when a :::roadmap has no saved data yet. */
 export function defaultBoard(): BoardData {
+  const cols: { title: string; tone: BoardColumn["tone"] }[] = [
+    { title: "New Tasks", tone: "" },
+    { title: "Ready", tone: "tips" },
+    { title: "Active", tone: "warn" },
+    { title: "Review", tone: "muted" },
+    { title: "Done", tone: "good" },
+  ];
   return {
-    columns: ["New Tasks", "Ready", "Active", "Review", "Done"].map((title) => ({
-      id: newBoardId("col"),
-      title,
-      cards: [],
-    })),
+    columns: cols.map(({ title, tone }) => ({ id: newBoardId("col"), title, tone, cards: [] })),
   };
 }
 
