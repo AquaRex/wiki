@@ -912,39 +912,60 @@
   border-bottom: none;
 }
 
-/* Term definitions ({{TypeDef}}) — a boxed concept name, and its references. */
+/* Term definitions ({{TypeDef}}). A bare def is a box identical to a variable
+   def; a term note reads like a reference but pops a styled overlay on hover. */
 .wiki .termdef {
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
   border-radius: 5px;
-  padding: 1px 8px;
+  padding: 2px 8px;
+  color: var(--waccent);
   font-weight: 600;
-  color: var(--text);
   white-space: nowrap;
   scroll-margin-top: 100px;
 }
-.wiki .termdef[title] {
-  cursor: help;
-  border-bottom: 2px solid var(--accent-line);
-}
-.wiki a.termref {
-  color: var(--text);
+/* References and notes read as orange links, like a variable reference. */
+.wiki a.termref,
+.wiki .termnote {
+  color: var(--waccent);
   text-decoration: none;
-  border-bottom: 1px dashed var(--border-strong);
+  border-bottom: 1px dotted var(--accent-line);
   cursor: pointer;
-  font-weight: 500;
+  position: relative;
 }
-.wiki a.termref:hover {
-  background: var(--surface-2);
-  border-bottom-color: var(--waccent);
+.wiki a.termref:hover,
+.wiki .termnote:hover {
+  background: var(--accent-soft);
+  border-bottom-style: solid;
 }
-.wiki a.termref[title] {
+.wiki .termnote {
   cursor: help;
 }
 .wiki .termref.missing {
   color: var(--crit);
   border-bottom: 1px dashed var(--crit);
   cursor: help;
+}
+/* The hover explanation overlay — orange border, brown background, white text,
+   positioned at the cursor (fixed, since we use client coordinates). The brown
+   is fixed (not accent-soft, which is pale in light mode) so white always reads. */
+.wiki .term-overlay {
+  position: fixed;
+  z-index: 60;
+  max-width: 320px;
+  background: #2a1e0f;
+  border: 1px solid var(--waccent);
+  border-radius: 6px;
+  padding: 8px 11px;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 500;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  white-space: normal;
 }
 .vardef-flash {
   animation: vardef-flash 1.6s ease-out;

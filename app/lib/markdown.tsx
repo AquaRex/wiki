@@ -498,22 +498,48 @@ function parseTypeToken(token: string): { name: string; explanation: string } {
   };
 }
 
-// A term definition: a boxed anchor. With an inline explanation it shows on
-// hover; bare, it's just the labelled anchor a TypeRef jumps to.
+/**
+ * A term with an inline explanation ({{TypeDef(Name|explanation)}}). Reads like a
+ * reference (orange text) but on hover pops a styled overlay — orange border,
+ * accent background, white text — positioned at the cursor.
+ */
+function TermNote({ name, explanation, anchorId }: { name: string; explanation: string; anchorId?: string }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  return (
+    <span
+      className="termnote"
+      id={anchorId}
+      onMouseEnter={(e) => setPos({ x: e.clientX, y: e.clientY })}
+      onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => setPos(null)}
+    >
+      {name}
+      {pos && (
+        <span className="term-overlay" style={{ left: pos.x + 12, top: pos.y + 16 }} role="tooltip">
+          {explanation}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// A term definition. Bare, it's a boxed anchor styled like a variable def. With
+// an inline explanation it reads as a note that pops a styled overlay on hover.
 function renderTypeDef(ctx: RenderContext, token: string): React.ReactNode {
   const { name, explanation } = parseTypeToken(token);
-  // The hover explanation prefers this def's own; else the registry's.
-  const registered = ctx.terms?.[name];
-  const hover = explanation || registered?.explanation || "";
+  if (explanation) {
+    return <TermNote key={k()} name={name} explanation={explanation} anchorId={termId(name)} />;
+  }
   return (
-    <span key={k()} className="termdef" id={termId(name)} title={hover || undefined}>
+    <span key={k()} className="termdef" id={termId(name)}>
       {name}
     </span>
   );
 }
 
 // A term reference: links to the term's canonical definition (bare anchor if one
-// exists), with the explanation on hover.
+// exists). If that definition carries an explanation, hovering pops the styled
+// overlay instead of a plain tooltip.
 function renderTypeRef(ctx: RenderContext, token: string): React.ReactNode {
   const { name } = parseTypeToken(token);
   const def = ctx.terms?.[name];
@@ -526,14 +552,44 @@ function renderTypeRef(ctx: RenderContext, token: string): React.ReactNode {
   }
   const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
   return (
-    <Link
+    <TermRefLink
       key={k()}
-      className="termref"
-      title={def.explanation || undefined}
+      name={name}
       to={`/${def.page}#${termId(name)}`}
+      explanation={def.explanation}
       preventScrollReset={samePage}
+    />
+  );
+}
+
+/** A reference link with an optional styled hover overlay (when the term has one). */
+function TermRefLink({
+  name,
+  to,
+  explanation,
+  preventScrollReset,
+}: {
+  name: string;
+  to: string;
+  explanation: string;
+  preventScrollReset: boolean;
+}) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  return (
+    <Link
+      className="termref"
+      to={to}
+      preventScrollReset={preventScrollReset}
+      onMouseEnter={explanation ? (e) => setPos({ x: e.clientX, y: e.clientY }) : undefined}
+      onMouseMove={explanation ? (e) => setPos({ x: e.clientX, y: e.clientY }) : undefined}
+      onMouseLeave={explanation ? () => setPos(null) : undefined}
     >
       {name}
+      {explanation && pos && (
+        <span className="term-overlay" style={{ left: pos.x + 12, top: pos.y + 16 }} role="tooltip">
+          {explanation}
+        </span>
+      )}
     </Link>
   );
 }
