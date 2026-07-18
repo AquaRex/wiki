@@ -49,8 +49,9 @@ Full reference lives on the wiki itself at `/Guides/Writing-Pages`. Highlights:
 | Syntax | Result |
 | --- | --- |
 | `[[Path/To/Page\|label]]` | wiki link (red-dashed if the page doesn't exist yet) |
-| `{{def:name=value\|description}}` | canonical variable definition (anchor) |
-| `{{name}}` / `{{name\|shown text}}` | variable reference — hover for value, click to jump to definition |
+| `{{var:name=value\|description}}` | variable definition (`var:global:` for a project-wide one pages can override) |
+| `{{term:name\|explanation}}` | term definition — a named concept with no value |
+| `{{name}}` / `{{name\|shown text}}` | reference to a variable or term — hover for info, click to jump to definition |
 | `## Heading` + `^ kicker` | auto-numbered section with monospace kicker |
 | `:::infobox Title … :::` | right-floating quick-info box (`Label: value` rows, `image:` line) |
 | `:::callout` `:::note` `:::pitfall` `:::warn` `:::good` | boxed content |
@@ -61,4 +62,4 @@ Full reference lives on the wiki itself at `/Guides/Writing-Pages`. Highlights:
 
 ## Content model
 
-Each page is one JSON file at `content/pages/<Path>.json`: header fields (`title`, `eyebrow`, `lede`, `tags`) plus an ordered list of markdown `blocks`. Variables are re-scanned from `{{def:…}}` occurrences on every load, so they can never go stale. Back up the wiki by copying `content/` — or just rely on git history, since every edit is a commit.
+Each page is one JSON file at `content/pages/<Path>.json`: header fields (`title`, `eyebrow`, `lede`, `tags`) plus an ordered list of markdown `blocks`. Variables and terms are re-scanned from `{{var:…}}` / `{{term:…}}` occurrences on every load, so they can never go stale. Back up the wiki by copying `content/` — or just rely on git history, since every edit is a commit.

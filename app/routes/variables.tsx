@@ -39,7 +39,7 @@ export default function Variables({ loaderData }: Route.ComponentProps) {
           <p className="hero-lede mt-4">
             Every variable defined in this project with{" "}
             <code className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[13px]">
-              {"{{def:name=value|description}}"}
+              {"{{var:name=value|description}}"}
             </code>
             . Reference one from any page by writing its exact name, or{" "}
             <code className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[13px]">{"{{name|label}}"}</code>{" "}

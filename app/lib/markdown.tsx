@@ -480,20 +480,18 @@ function findPage(ctx: RenderContext, target: string) {
 
 const INLINE_SRC = [
     "(`[^`]+`)", // 1 code
-    "(\\{\\{def:[^}]+\\}\\})", // 2 variable definition
+    "(\\{\\{var:[^}]+\\}\\})", // 2 variable definition
     "(\\{\\{-?\\d[^|}]*(?:\\|[^}]*)?\\}\\})", // 3 magic value (starts with a digit — names can't)
-    "(\\{\\{TermDef\\([^)]*\\)\\}\\})", // 4 term definition
-    "(\\{\\{TermNote\\([^)]*\\)\\}\\})", // 5 term note (with hover explanation)
-    "(\\{\\{TermRef\\([^)]*\\)\\}\\})", // 6 term reference
-    "(\\{\\{[A-Za-z0-9_.-]+(?:\\|[^}]*)?\\}\\})", // 7 variable reference
-    "(\\[\\[[^\\]]+\\]\\])", // 8 wiki link
-    "(!\\[[^\\]]*\\]\\([^)]+\\)(?:\\{[^}]*\\})?)", // 9 image (optional {w=…} size)
-    "(\\[[^\\]]+\\]\\([^)]+\\))", // 10 external link
-    "(\\*\\*.+?\\*\\*)", // 11 bold
-    "(\\*[^*\\n]+\\*)", // 12 italic
-    "(==[^=]+==)", // 13 accent term
-    "(:(?:error|warn|good|tips|muted|white)\\[[^\\]]*\\])", // 14 coloured span :tone[text]
-    "((?<!:):(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 15 coloured inline run (to line end)
+    "(\\{\\{term:[^}]+\\}\\})", // 4 term definition
+    "(\\{\\{[A-Za-z0-9_.-]+(?:\\|[^}]*)?\\}\\})", // 5 reference — variable or term, resolved by name
+    "(\\[\\[[^\\]]+\\]\\])", // 6 wiki link
+    "(!\\[[^\\]]*\\]\\([^)]+\\)(?:\\{[^}]*\\})?)", // 7 image (optional {w=…} size)
+    "(\\[[^\\]]+\\]\\([^)]+\\))", // 8 external link
+    "(\\*\\*.+?\\*\\*)", // 9 bold
+    "(\\*[^*\\n]+\\*)", // 10 italic
+    "(==[^=]+==)", // 11 accent term
+    "(:(?:error|warn|good|tips|muted|white)\\[[^\\]]*\\])", // 12 coloured span :tone[text]
+    "((?<!:):(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 13 coloured inline run (to line end)
 ].join("|");
 
 /** ":error text" — colour only, to end of line. */
@@ -504,7 +502,7 @@ const LINE_TONE_RE = /^::(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
 
 // Mirrors DEF_RE in shared.ts — name, value, description, then the optional
 // "private" flag that keeps the definition out of the All variables index.
-const DEF_INNER_RE = /^\{\{def:(global:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}$/;
+const DEF_INNER_RE = /^\{\{var:(global:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}$/;
 
 /* ---------------------------------------------------------------- */
 /* Chip — the shared primitive for variable & term defs/refs/notes.   */
@@ -616,14 +614,14 @@ function variableInlineLink(ctx: RenderContext, name: string): React.ReactNode {
   );
 }
 
-/** Term id anchors are slugified so a TermRef can jump to them. */
+/** Term id anchors are slugified so a term reference can jump to them. */
 function termId(name: string): string {
   return `term-${slugify(name)}`;
 }
 
-/** Parses the inner of a {{TermDef|TermNote|TermRef(...)}} token; strips global:. */
+/** Parses the inner of a {{term:...}} token; strips the global: prefix. */
 function parseTermToken(token: string): { name: string; explanation: string } {
-  const inner = token.replace(/^\{\{Term(?:Def|Note|Ref)\(/, "").replace(/\)\}\}$/, "").replace(/^global:/, "");
+  const inner = token.slice(2, -2).replace(/^term:/, "").replace(/^global:/, "");
   const pipe = inner.indexOf("|");
   return {
     name: (pipe === -1 ? inner : inner.slice(0, pipe)).trim(),
@@ -631,63 +629,54 @@ function parseTermToken(token: string): { name: string; explanation: string } {
   };
 }
 
-// {{TermDef(Name)}} — a neutral boxed anchor. Notes are a separate token. A local
-// def that shadows a global hovers/links the global (see the vardef equivalent).
+// {{term:Name}} — a bare anchor; {{term:Name|explanation}} adds a hover card. A
+// local def that shadows a global hovers/links the global (like the vardef).
 function renderTermDef(ctx: RenderContext, token: string): React.ReactNode {
-  const { name } = parseTermToken(token);
-  const shadowed = ctx.terms?.[name]?.global;
-  return (
-    <Chip
-      key={k()}
-      ctx={ctx}
-      variant="termdef"
-      label={renderInline(name, ctx)}
-      id={termId(name)}
-      description={shadowed?.explanation}
-      to={shadowed ? `/${shadowed.page}#${termId(name)}` : undefined}
-    />
-  );
-}
-
-// {{TermNote(Name|explanation)}} — an anchor that shows its explanation on hover.
-function renderTermNote(ctx: RenderContext, token: string): React.ReactNode {
   const { name, explanation } = parseTermToken(token);
   const shadowed = ctx.terms?.[name]?.global;
   return (
     <Chip
       key={k()}
       ctx={ctx}
-      variant="termnote"
+      variant={explanation || shadowed ? "termnote" : "termdef"}
       label={renderInline(name, ctx)}
+      id={termId(name)}
       description={shadowed ? shadowed.explanation : explanation}
-      id={termId(name)}
       to={shadowed ? `/${shadowed.page}#${termId(name)}` : undefined}
     />
   );
 }
 
-// {{TermRef(Name)}} or {{TermRef(Name|own description)}} — a link chip to the def.
-function renderTermRef(ctx: RenderContext, token: string): React.ReactNode {
-  const { name, explanation } = parseTermToken(token);
-  const def = ctx.terms?.[name];
-  if (!def) {
+/**
+ * {{name}} / {{name|extra}} — a reference resolved to a variable or a term by
+ * name (variables win a name collision, as they do for bare words). For a
+ * variable, `extra` is a display label; for a term, a per-reference hover note.
+ */
+function renderReference(ctx: RenderContext, name: string, extra: string): React.ReactNode {
+  if (ctx.variables[name]) {
+    const link = variableLink(ctx, name, extra || name);
+    return link ?? name;
+  }
+  const term = ctx.terms?.[name];
+  if (term) {
+    const samePage = term.page.toLowerCase() === ctx.currentPath.toLowerCase();
     return (
-      <span key={k()} className="chip termref missing" title={`Undefined term: ${name}`}>
-        {name}
-      </span>
+      <Chip
+        key={k()}
+        ctx={ctx}
+        variant="termref"
+        label={renderInline(name, ctx)}
+        description={extra || term.explanation}
+        to={`/${term.page}#${termId(name)}`}
+        preventScrollReset={samePage}
+      />
     );
   }
-  const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
+  // Neither a variable nor a term — a dashed-red missing chip, no link.
   return (
-    <Chip
-      key={k()}
-      ctx={ctx}
-      variant="termref"
-      label={renderInline(name, ctx)}
-      description={explanation || def.explanation}
-      to={`/${def.page}#${termId(name)}`}
-      preventScrollReset={samePage}
-    />
+    <span key={k()} className="chip varref missing" title={`Undefined variable or term: ${name}`}>
+      {extra || name}
+    </span>
   );
 }
 
@@ -869,31 +858,18 @@ export function renderInline(
         <Chip key={k()} ctx={ctx} variant="magicval" label={renderInline(value, ctx)} description={note} />
       );
     } else if (m[4]) {
-      // {{TermDef(Name)}} — a bare term anchor.
+      // {{term:[global:]Name[|explanation]}} — a term definition/anchor.
       out.push(renderTermDef(ctx, token));
     } else if (m[5]) {
-      // {{TermNote(Name|explanation)}} — term with a hover explanation.
-      out.push(renderTermNote(ctx, token));
-    } else if (m[6]) {
-      // {{TermRef(Name)}} — links to the term's definition.
-      out.push(renderTermRef(ctx, token));
-    } else if (m[7]) {
+      // {{name}} or {{name|extra}} — a reference. Resolves to a variable or a
+      // term (whichever the name is defined as); for a variable the extra is a
+      // display label, for a term it's a per-reference hover note.
       const inner = token.slice(2, -2);
       const pipe = inner.indexOf("|");
-      const name = pipe === -1 ? inner : inner.slice(0, pipe);
-      const label = pipe === -1 ? name : inner.slice(pipe + 1);
-      const link = variableLink(ctx, name, label);
-      if (link) {
-        out.push(link);
-      } else {
-        // Unknown variable — a plain dashed-red chip, no link.
-        out.push(
-          <span key={k()} className="chip varref missing" title={`Undefined variable: ${name}`}>
-            {label}
-          </span>
-        );
-      }
-    } else if (m[8]) {
+      const name = (pipe === -1 ? inner : inner.slice(0, pipe)).trim();
+      const extra = pipe === -1 ? "" : inner.slice(pipe + 1).trim();
+      out.push(renderReference(ctx, name, extra));
+    } else if (m[6]) {
       const inner = token.slice(2, -2);
       const pipe = inner.indexOf("|");
       const target = (pipe === -1 ? inner : inner.slice(0, pipe)).trim();
@@ -904,7 +880,7 @@ export function renderInline(
           {label}
         </Link>
       );
-    } else if (m[9]) {
+    } else if (m[7]) {
       const { image, suffix } = splitImageSuffix(token);
       const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(image)!;
       const { src: imgSrc, align } = splitImageAlign(im[2]);
@@ -914,7 +890,7 @@ export function renderInline(
       out.push(
         <Asset key={`img:${imgSrc}`} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} size={parseImageSize(suffix)} />
       );
-    } else if (m[10]) {
+    } else if (m[8]) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!;
       if (lm[2].startsWith("#")) {
         // An in-page anchor: link by hash so the route's scroll effect runs.
@@ -930,17 +906,17 @@ export function renderInline(
           </a>
         );
       }
-    } else if (m[11]) {
+    } else if (m[9]) {
       out.push(<strong key={k()}>{renderInline(token.slice(2, -2), ctx)}</strong>);
-    } else if (m[12]) {
+    } else if (m[10]) {
       out.push(<em key={k()}>{renderInline(token.slice(1, -1), ctx)}</em>);
-    } else if (m[13]) {
+    } else if (m[11]) {
       out.push(
         <em key={k()} className="term">
           {renderInline(token.slice(2, -2), ctx)}
         </em>
       );
-    } else if (m[14]) {
+    } else if (m[12]) {
       // :tone[text] — colours just the bracketed text, formatting preserved.
       const tm = /^:(\w+)\[([\s\S]*)\]$/.exec(token)!;
       out.push(
@@ -948,7 +924,7 @@ export function renderInline(
           {renderInline(tm[2], ctx)}
         </span>
       );
-    } else if (m[15]) {
+    } else if (m[13]) {
       // :tone … — colours the rest of the run.
       const tm = INLINE_TONE_RE.exec(token)!;
       out.push(
@@ -1336,7 +1312,7 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
 /**
  * Splits a table row into cells on the `|` separators, honouring `\|` as a
  * literal pipe (the standard markdown escape) so a cell can contain one — e.g.
- * `{{TermNote(Name\|explanation)}}`. The escape is then removed so the cell
+ * `{{term:Name\|explanation}}`. The escape is then removed so the cell
  * renders a bare `|`.
  */
 function splitTableCells(line: string): string[] {

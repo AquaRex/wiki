@@ -67,7 +67,7 @@ export interface TermDef {
   explanation: string;
   page: string;
   blockId: string;
-  /** "global" when defined with `TermDef(global:Name)`; "local" otherwise. */
+  /** "global" when defined with `term:global:Name`; "local" otherwise. */
   scope: "global" | "local";
   /** The shadowed global term, attached when a local def overrides a global. */
   global?: TermDef;
@@ -270,16 +270,16 @@ export function blankPage(rawPath: string, title?: string): WikiPage {
 }
 
 /**
- * {{def:name=value|description|custom display}}
+ * {{var:name=value|description|custom display}}
  *   - a plain def is page-local: it overrides a global of the same name here, or
  *     is just a page-local variable if no global exists
- *   - a `global:` prefix ({{def:global:name=value|desc}}) defines the project-wide
+ *   - a `global:` prefix ({{var:global:name=value|desc}}) defines the project-wide
  *     variable that other pages may override locally
  *   - the value may be omitted (a name-only global template)
  *   - the optional 4th field overrides how the chip is displayed (inline markup)
  * Refs ({{name}}) resolve by name.
  */
-export const DEF_RE = /\{\{def:(global:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}/g;
+export const DEF_RE = /\{\{var:(global:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}/g;
 
 /** Every variable def across the given pages, in document order. */
 export function collectVariableDefs(pages: WikiPage[]): VariableDef[] {
@@ -336,11 +336,12 @@ export function extractVariables(pages: WikiPage[]): Record<string, VariableDef>
 }
 
 /**
- * {{TermDef(Name)}}                — a bare term anchor (jump target)
- * {{TermNote(Name | explanation)}} — a term with a hover explanation
- * Both register the term so a {{TermRef}} can resolve to it.
+ * {{term:Name}}                — a bare term anchor (jump target)
+ * {{term:Name|explanation}}    — a term with a hover explanation
+ * {{term:global:Name|expl}}    — the project-wide term other pages override
+ * A reference is just {{Name}} (resolved to a term when it isn't a variable).
  */
-export const TYPEDEF_RE = /\{\{Term(?:Def|Note)\(\s*(global:)?([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^)]*?)\s*)?\)\}\}/g;
+export const TYPEDEF_RE = /\{\{term:(global:)?([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^}]*?)\s*)?\}\}/g;
 
 export interface RawTermDef {
   name: string;
@@ -420,8 +421,8 @@ function plainText(markup: string): string {
   return markup
     .replace(/^```.*$/gm, " ")
     .replace(/^:::.*$/gm, " ")
-    .replace(/\{\{Term(?:Def|Note|Ref)\(\s*(?:global:)?([^|)]+?)\s*(?:\|[^)]*)?\)\}\}/g, "$1")
-    .replace(/\{\{def:(?:global:)?([^=|}]+?)\s*(?:=\s*([^|}]*?))?\s*(?:\|([^}]*))?\}\}/g, "$1 $2 $3")
+    .replace(/\{\{term:(?:global:)?([^|}]+?)\s*(?:\|[^}]*)?\}\}/g, "$1")
+    .replace(/\{\{var:(?:global:)?([^=|}]+?)\s*(?:=\s*([^|}]*?))?\s*(?:\|([^}]*))?\}\}/g, "$1 $2 $3")
     .replace(/\{\{(-?\d[^|}]*)\|([^}]*)\}\}/g, "$1 $2")
     .replace(/\{\{([^|}]+)\|([^}]*)\}\}/g, "$2")
     .replace(/\{\{([^}]+)\}\}/g, "$1")
