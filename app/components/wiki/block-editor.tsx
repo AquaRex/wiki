@@ -105,16 +105,16 @@ const SNIPPETS: Snippet[] = [
   { label: "Bold", icon: <Bold className="size-3.5" />, text: "**bold**", wrap: ["**", "**"], core: true },
   { label: "Italic", icon: <Italic className="size-3.5" />, text: "*italic*", wrap: ["*", "*"], core: true },
   { label: "Code", icon: <Code className="size-3.5" />, text: "`code`", wrap: ["`", "`"], core: true },
-  { label: "Term", icon: <Sigma className="size-3.5" />, text: "==highlighted term==", wrap: ["==", "=="], core: true },
+  { label: "Accent", icon: <Sigma className="size-3.5" />, text: "==accented term==", wrap: ["==", "=="], core: true },
   { label: "Subtext", icon: <Baseline className="size-3.5" />, text: "^ subtext", block: true, core: true },
   { label: "Wiki link", icon: <Link2 className="size-3.5" />, text: "[[Enemies/Example|label]]", wrap: ["[[", "]]"], core: true },
 
-  // --- inline tones: ":tone text" colours the words only
-  { label: ":Error", icon: <CircleX className="size-3.5" />, text: ":error text", wrap: [":error ", ""] },
-  { label: ":Warn", icon: <TriangleAlert className="size-3.5" />, text: ":warn text", wrap: [":warn ", ""] },
-  { label: ":Good", icon: <CircleCheck className="size-3.5" />, text: ":good text", wrap: [":good ", ""] },
-  { label: ":Tip", icon: <Info className="size-3.5" />, text: ":tips text", wrap: [":tips ", ""] },
-  { label: ":Muted", icon: <Baseline className="size-3.5" />, text: ":muted text", wrap: [":muted ", ""] },
+  // --- inline tones: ":tone[text]" colours just the bracketed words
+  { label: ":Error", icon: <CircleX className="size-3.5" />, text: ":error[text]", wrap: [":error[", "]"] },
+  { label: ":Warn", icon: <TriangleAlert className="size-3.5" />, text: ":warn[text]", wrap: [":warn[", "]"] },
+  { label: ":Good", icon: <CircleCheck className="size-3.5" />, text: ":good[text]", wrap: [":good[", "]"] },
+  { label: ":Tip", icon: <Info className="size-3.5" />, text: ":tips[text]", wrap: [":tips[", "]"] },
+  { label: ":Muted", icon: <Baseline className="size-3.5" />, text: ":muted[text]", wrap: [":muted[", "]"] },
 
   // --- structure
   { label: "Divider", icon: <Minus className="size-3.5" />, text: "---", block: true },
@@ -129,7 +129,13 @@ const SNIPPETS: Snippet[] = [
   { label: "Term def", icon: <Braces className="size-3.5" />, text: "{{TermDef(Hearing)}}" },
   { label: "Term note", icon: <Braces className="size-3.5" />, text: "{{TermNote(Hearing|A **formatted** explanation shown on hover)}}" },
   { label: "Term ref", icon: <Braces className="size-3.5" />, text: "{{TermRef(Hearing)}}" },
+  { label: "Term ref note", icon: <Braces className="size-3.5" />, text: "{{TermRef(Hearing|A note shown only on this reference)}}" },
   { label: "Value", icon: <Braces className="size-3.5" />, text: "{{0.57|why this value}}" },
+  { label: "Value units", icon: <Braces className="size-3.5" />, text: "{{30 u/s}}" },
+  { label: "Image", icon: <ImageIcon className="size-3.5" />, text: "![caption](/uploads/example.png)", block: true },
+  { label: "Image sized", icon: <ImageIcon className="size-3.5" />, text: "![caption](/uploads/example.png){w=300}", block: true },
+  { label: "Image right", icon: <ImageIcon className="size-3.5" />, text: "![caption](/uploads/example.png >){w=260}", block: true },
+  { label: "Image full", icon: <ImageIcon className="size-3.5" />, text: "![caption](/uploads/example.png){w=max}", block: true },
   { label: "Code block", icon: <Code2 className="size-3.5" />, text: "```csharp:EnemyAI.cs\n// code here\n```", block: true },
   { label: "Raw text", icon: <FileText className="size-3.5" />, text: "~~~ Label\nPaste raw text here — backticks and any markup are shown verbatim.\n~~~", block: true, wrap: ["~~~\n", "\n~~~"] },
   {
@@ -161,7 +167,10 @@ const SNIPPETS: Snippet[] = [
   },
   { label: "Flow", icon: <GitBranch className="size-3.5" />, text: ":::flow\nFirst thing happens\nThen this\nFinally this\n:::", block: true },
   { label: "Steps", icon: <ListOrdered className="size-3.5" />, text: ":::steps\n- **First step** — what to do and why\n- **Second step** — what to do and why\n:::", block: true },
+  { label: "Contents", icon: <List className="size-3.5" />, text: ":::contents On this page\n:::", block: true },
+  { label: "Contents mini", icon: <PanelRight className="size-3.5" />, text: ":::contents mini(>) On this page\n:::", block: true },
   { label: "Blueprint", icon: <GitBranch className="size-3.5" />, text: ":::blueprint\nPaste copied Unreal Blueprint nodes here.\n:::", block: true, wrap: [":::blueprint\n", "\n:::"] },
+  { label: "Material", icon: <GitBranch className="size-3.5" />, text: ":::material\nPaste copied Unreal Material nodes here.\n:::", block: true, wrap: [":::material\n", "\n:::"] },
 ];
 
 function SnippetButton({ snippet, onInsert }: { snippet: Snippet; onInsert: (s: Snippet) => void }) {
@@ -444,33 +453,6 @@ function BlockEditorPanel({
   };
 
   /**
-   * The live preview sits above the textarea, so anything that changes its
-   * height — a new block, an image finishing loading — pushes the textarea
-   * down mid-keystroke. Watch it and hold the textarea still instead.
-   */
-  useEffect(() => {
-    const el = textareaRef.current;
-    const preview = previewRef.current;
-    if (!el || !preview) {
-      return;
-    }
-    let last = el.getBoundingClientRect().top;
-    const observer = new ResizeObserver(() => {
-      const now = el.getBoundingClientRect().top;
-      const drift = now - last;
-      // Only correct while the author is actually typing in this block.
-      if (drift !== 0 && document.activeElement === el) {
-        window.scrollBy({ top: drift, behavior: "instant" as ScrollBehavior });
-        last = el.getBoundingClientRect().top;
-      } else {
-        last = now;
-      }
-    });
-    observer.observe(preview);
-    return () => observer.disconnect();
-  }, []);
-
-  /**
    * Applies a snippet. With text selected, a snippet that defines a wrap keeps
    * the selection and formats around it; otherwise the snippet's sample text is
    * inserted so the button still teaches the syntax.
@@ -557,11 +539,12 @@ function BlockEditorPanel({
   if (hasBlueprint(draft)) {
     return (
       <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
-        <div className="wiki border-b border-border px-5 pb-4 pt-1">
+        <SegmentedEditor draft={draft} onChange={setDraft} onSave={save} onCancel={onClose} />
+        <div className="wiki border-t border-border px-5 pb-4 pt-3">
+          <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-faint">Preview</div>
           {renderMarkdown(draft, previewCtx, h2Start)}
           <div className="clear-both" />
         </div>
-        <SegmentedEditor draft={draft} onChange={setDraft} onSave={save} onCancel={onClose} />
         <div className="flex items-center justify-between border-t border-border px-3 py-2">
           <span className="font-mono text-[10.5px] uppercase tracking-wider text-text-faint">
             Graph text is collapsed · Ctrl+Enter to save · Esc to cancel
@@ -581,10 +564,6 @@ function BlockEditorPanel({
 
   return (
     <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
-      <div ref={previewRef} className="wiki border-b border-border px-5 pb-4 pt-1">
-        {renderMarkdown(draft, previewCtx, h2Start)}
-        <div className="clear-both" />
-      </div>
       <div className="border-b border-border bg-surface-2 px-2 py-1.5">
         <div className="flex flex-wrap items-center gap-1">
           {SNIPPETS.filter((s) => s.core).map((snippet) => (
@@ -654,9 +633,14 @@ function BlockEditorPanel({
         spellCheck={false}
         className="editor-textarea block w-full resize-none bg-code-bg px-5 py-4 text-foreground outline-none"
       />
+      <div ref={previewRef} className="wiki border-t border-border px-5 pb-4 pt-3">
+        <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-faint">Preview</div>
+        {renderMarkdown(draft, previewCtx, h2Start)}
+        <div className="clear-both" />
+      </div>
       <div className="flex items-center justify-between border-t border-border px-3 py-2">
         <span className="font-mono text-[10.5px] uppercase tracking-wider text-text-faint">
-          Live preview above · Ctrl+Enter to save · Esc to cancel · paste images directly
+          Live preview below · Ctrl+Enter to save · Esc to cancel · paste images directly
         </span>
         <div className="flex gap-2">
           <Button variant="ghost" size="xs" onClick={onClose} disabled={busy}>

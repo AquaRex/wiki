@@ -811,8 +811,10 @@ export function renderInline(
       const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(image)!;
       const { src: imgSrc, align } = splitImageAlign(im[2]);
       const inlineClass = `wk-inline-img ${alignClasses(align)}`;
+      // Keyed by src, not position, so editing text around an image doesn't
+      // remount it (which would blink the picture while typing).
       out.push(
-        <Asset key={k()} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} size={parseImageSize(suffix)} />
+        <Asset key={`img:${imgSrc}`} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} size={parseImageSize(suffix)} />
       );
     } else if (m[10]) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!;
