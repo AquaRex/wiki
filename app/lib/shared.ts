@@ -44,6 +44,19 @@ export interface VariableDef {
   blockId: string;
 }
 
+/**
+ * A term definition — a named concept with no value, unlike a variable. Created
+ * with {{TypeDef(Name)}} (a bare anchor) or {{TypeDef(Name|explanation)}} (with
+ * a hover explanation). {{TypeRef(Name)}} links to it.
+ */
+export interface TermDef {
+  name: string;
+  /** Hover text, from a {{TypeDef(Name|explanation)}}; empty for a bare anchor. */
+  explanation: string;
+  page: string;
+  blockId: string;
+}
+
 export interface SearchResult {
   path: string;
   title: string;
@@ -275,10 +288,50 @@ export function extractVariables(pages: WikiPage[]): Record<string, VariableDef>
   return vars;
 }
 
+/**
+ * {{TypeDef(Name)}}               — a bare term anchor (jump target)
+ * {{TypeDef(Name | explanation)}} — a term with a hover explanation
+ */
+export const TYPEDEF_RE = /\{\{TypeDef\(\s*([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^)]*?)\s*)?\)\}\}/g;
+
+/**
+ * Collects every term across all pages, keyed by name. A BARE definition is the
+ * canonical anchor (its page/block is the jump target); an explanation from any
+ * definition of the same name is kept for the hover. So a term can be anchored
+ * in one place and explained inline elsewhere, and refs still resolve correctly.
+ */
+export function extractTerms(pages: WikiPage[]): Record<string, TermDef> {
+  const terms: Record<string, TermDef> = {};
+  for (const page of pages) {
+    for (const block of page.blocks) {
+      for (const match of block.text.matchAll(TYPEDEF_RE)) {
+        const name = match[1];
+        const explanation = (match[2] ?? "").trim();
+        const isBare = !explanation;
+        const existing = terms[name];
+        if (!existing) {
+          terms[name] = { name, explanation, page: page.path, blockId: block.id };
+          continue;
+        }
+        // A bare def is the canonical anchor — prefer its location. Keep whichever
+        // explanation exists so a ref can still show it on hover.
+        terms[name] = {
+          name,
+          explanation: explanation || existing.explanation,
+          page: isBare ? page.path : existing.page,
+          blockId: isBare ? block.id : existing.blockId,
+        };
+      }
+    }
+  }
+  return terms;
+}
+
 function plainText(markup: string): string {
   return markup
     .replace(/^```.*$/gm, " ")
     .replace(/^:::.*$/gm, " ")
+    .replace(/\{\{Type(?:Def|Ref)\(\s*([^|)]+?)\s*(?:\|[^)]*)?\)\}\}/g, "$1")
     .replace(/\{\{def:([^=}]+)=([^|}]*?)\s*(?:\|([^}]*))?\}\}/g, "$1 = $2 $3")
     .replace(/\{\{(-?\d[^|}]*)\|([^}]*)\}\}/g, "$1 $2")
     .replace(/\{\{([^|}]+)\|([^}]*)\}\}/g, "$2")

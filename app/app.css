@@ -911,6 +911,41 @@
   text-decoration: none;
   border-bottom: none;
 }
+
+/* Term definitions ({{TypeDef}}) — a boxed concept name, and its references. */
+.wiki .termdef {
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  scroll-margin-top: 100px;
+}
+.wiki .termdef[title] {
+  cursor: help;
+  border-bottom: 2px solid var(--accent-line);
+}
+.wiki a.termref {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--border-strong);
+  cursor: pointer;
+  font-weight: 500;
+}
+.wiki a.termref:hover {
+  background: var(--surface-2);
+  border-bottom-color: var(--waccent);
+}
+.wiki a.termref[title] {
+  cursor: help;
+}
+.wiki .termref.missing {
+  color: var(--crit);
+  border-bottom: 1px dashed var(--crit);
+  cursor: help;
+}
 .vardef-flash {
   animation: vardef-flash 1.6s ease-out;
 }

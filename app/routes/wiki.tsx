@@ -12,6 +12,7 @@ import {
   type PageSummary,
   type RootMeta,
   type VariableDef,
+  type TermDef,
   type WikiPage,
 } from "~/lib/shared";
 import { getStore } from "~/lib/store";
@@ -76,6 +77,13 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
       projectVariables[def.name] = def;
     }
   }
+  const terms = await store.getTerms();
+  const projectTerms: Record<string, TermDef> = {};
+  for (const def of Object.values(terms)) {
+    if (pathInProject(def.page, project)) {
+      projectTerms[def.name] = def;
+    }
+  }
 
   return {
     landing: false as const,
@@ -84,6 +92,7 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
     page,
     project,
     variables: projectVariables,
+    terms: projectTerms,
     requestedPath: pagePath,
   };
 }
@@ -628,6 +637,7 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
   const renderCtx = useMemo(
     () => ({
       variables: loaderData.variables ?? {},
+      terms: loaderData.landing ? {} : (loaderData.terms ?? {}),
       pages: loaderData.allPages,
       currentPath: loaderData.page?.path ?? loaderData.requestedPath,
       project: loaderData.landing ? undefined : loaderData.project,

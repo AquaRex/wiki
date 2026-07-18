@@ -3,6 +3,7 @@ import { wikiConfig } from "~/wiki.config";
 import {
   blankPage,
   emptyProjectMeta,
+  extractTerms,
   extractVariables,
   isRelLocked,
   normalizePath,
@@ -16,6 +17,7 @@ import {
   type RootMeta,
   type SearchResult,
   type VariableDef,
+  type TermDef,
   type WikiPage,
   type AccessLevel,
 } from "./shared";
@@ -36,6 +38,7 @@ export interface WikiStore {
   /** Moves pages and repoints wiki links that pointed at them. */
   movePages(moves: PageMove[]): Promise<void>;
   getVariables(): Promise<Record<string, VariableDef>>;
+  getTerms(): Promise<Record<string, TermDef>>;
   search(query: string): Promise<SearchResult[]>;
   /**
    * Verifies a locked page's password server-side and, on success, returns the
@@ -413,6 +416,11 @@ class SupabaseStore implements WikiStore {
   async getVariables() {
     const pages = await this.pages();
     return extractVariables(Array.from(pages.values()));
+  }
+
+  async getTerms() {
+    const pages = await this.pages();
+    return extractTerms(Array.from(pages.values()));
   }
 
   async search(query: string) {

@@ -11,8 +11,17 @@ export interface RenderVariable {
   blockId: string;
 }
 
+export interface RenderTerm {
+  name: string;
+  explanation: string;
+  page: string;
+  blockId: string;
+}
+
 export interface RenderContext {
   variables: Record<string, RenderVariable>;
+  /** Named term definitions ({{TypeDef}}), used to resolve {{TypeRef}} links. */
+  terms?: Record<string, RenderTerm>;
   /** All pages (across projects) — used for link resolution. */
   pages: { path: string; title: string }[];
   currentPath: string;
@@ -438,14 +447,16 @@ const INLINE_SRC = [
     "(`[^`]+`)", // 1 code
     "(\\{\\{def:[^}]+\\}\\})", // 2 variable definition
     "(\\{\\{-?\\d[^|}]*(?:\\|[^}]*)?\\}\\})", // 3 magic value (starts with a digit — names can't)
-    "(\\{\\{[A-Za-z0-9_.-]+(?:\\|[^}]*)?\\}\\})", // 4 variable reference
-    "(\\[\\[[^\\]]+\\]\\])", // 5 wiki link
-    "(!\\[[^\\]]*\\]\\([^)]+\\)(?:\\{[^}]*\\})?)", // 6 image (optional {w=…} size)
-    "(\\[[^\\]]+\\]\\([^)]+\\))", // 7 external link
-    "(\\*\\*.+?\\*\\*)", // 8 bold
-    "(\\*[^*\\n]+\\*)", // 9 italic
-    "(==[^=]+==)", // 10 accent term
-    "((?<!:):(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 11 coloured inline run
+    "(\\{\\{TypeDef\\([^)]*\\)\\}\\})", // 4 term definition
+    "(\\{\\{TypeRef\\([^)]*\\)\\}\\})", // 5 term reference
+    "(\\{\\{[A-Za-z0-9_.-]+(?:\\|[^}]*)?\\}\\})", // 6 variable reference
+    "(\\[\\[[^\\]]+\\]\\])", // 7 wiki link
+    "(!\\[[^\\]]*\\]\\([^)]+\\)(?:\\{[^}]*\\})?)", // 8 image (optional {w=…} size)
+    "(\\[[^\\]]+\\]\\([^)]+\\))", // 9 external link
+    "(\\*\\*.+?\\*\\*)", // 10 bold
+    "(\\*[^*\\n]+\\*)", // 11 italic
+    "(==[^=]+==)", // 12 accent term
+    "((?<!:):(?:error|warn|good|tips|muted)\\b[^\\n]*)", // 13 coloured inline run
 ].join("|");
 
 /** ":error text" — colour only, to end of line. */
@@ -468,6 +479,61 @@ function variableLink(ctx: RenderContext, name: string, label: React.ReactNode):
   return (
     <Link key={k()} className="varref" title={tooltip} to={`/${def.page}#var-${name}`} preventScrollReset={samePage}>
       {label}
+    </Link>
+  );
+}
+
+/** term id anchors are slugified so a TypeRef can jump to them. */
+function termId(name: string): string {
+  return `term-${slugify(name)}`;
+}
+
+/** Parses the inner of a {{TypeDef(...)}} / {{TypeRef(...)}} token. */
+function parseTypeToken(token: string): { name: string; explanation: string } {
+  const inner = token.replace(/^\{\{Type(?:Def|Ref)\(/, "").replace(/\)\}\}$/, "");
+  const pipe = inner.indexOf("|");
+  return {
+    name: (pipe === -1 ? inner : inner.slice(0, pipe)).trim(),
+    explanation: pipe === -1 ? "" : inner.slice(pipe + 1).trim(),
+  };
+}
+
+// A term definition: a boxed anchor. With an inline explanation it shows on
+// hover; bare, it's just the labelled anchor a TypeRef jumps to.
+function renderTypeDef(ctx: RenderContext, token: string): React.ReactNode {
+  const { name, explanation } = parseTypeToken(token);
+  // The hover explanation prefers this def's own; else the registry's.
+  const registered = ctx.terms?.[name];
+  const hover = explanation || registered?.explanation || "";
+  return (
+    <span key={k()} className="termdef" id={termId(name)} title={hover || undefined}>
+      {name}
+    </span>
+  );
+}
+
+// A term reference: links to the term's canonical definition (bare anchor if one
+// exists), with the explanation on hover.
+function renderTypeRef(ctx: RenderContext, token: string): React.ReactNode {
+  const { name } = parseTypeToken(token);
+  const def = ctx.terms?.[name];
+  if (!def) {
+    return (
+      <span key={k()} className="termref missing" title={`Undefined term: ${name}`}>
+        {name}
+      </span>
+    );
+  }
+  const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
+  return (
+    <Link
+      key={k()}
+      className="termref"
+      title={def.explanation || undefined}
+      to={`/${def.page}#${termId(name)}`}
+      preventScrollReset={samePage}
+    >
+      {name}
     </Link>
   );
 }
@@ -576,6 +642,12 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
         </span>
       );
     } else if (m[4]) {
+      // {{TypeDef(Name)}} or {{TypeDef(Name|explanation)}} — a term anchor.
+      out.push(renderTypeDef(ctx, token));
+    } else if (m[5]) {
+      // {{TypeRef(Name)}} — links to the term's definition.
+      out.push(renderTypeRef(ctx, token));
+    } else if (m[6]) {
       const inner = token.slice(2, -2);
       const pipe = inner.indexOf("|");
       const name = pipe === -1 ? inner : inner.slice(0, pipe);
@@ -590,7 +662,7 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
           </span>
         );
       }
-    } else if (m[5]) {
+    } else if (m[7]) {
       const inner = token.slice(2, -2);
       const pipe = inner.indexOf("|");
       const target = (pipe === -1 ? inner : inner.slice(0, pipe)).trim();
@@ -601,7 +673,7 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
           {label}
         </Link>
       );
-    } else if (m[6]) {
+    } else if (m[8]) {
       const { image, suffix } = splitImageSuffix(token);
       const im = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(image)!;
       const { src: imgSrc, align } = splitImageAlign(im[2]);
@@ -609,24 +681,24 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
       out.push(
         <Asset key={k()} ctx={ctx} src={imgSrc} alt={im[1]} className={inlineClass} size={parseImageSize(suffix)} />
       );
-    } else if (m[7]) {
+    } else if (m[9]) {
       const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)!;
       out.push(
         <a key={k()} className="ext" href={lm[2]} target="_blank" rel="noreferrer">
           {lm[1]}
         </a>
       );
-    } else if (m[8]) {
-      out.push(<strong key={k()}>{renderInline(token.slice(2, -2), ctx)}</strong>);
-    } else if (m[9]) {
-      out.push(<em key={k()}>{renderInline(token.slice(1, -1), ctx)}</em>);
     } else if (m[10]) {
+      out.push(<strong key={k()}>{renderInline(token.slice(2, -2), ctx)}</strong>);
+    } else if (m[11]) {
+      out.push(<em key={k()}>{renderInline(token.slice(1, -1), ctx)}</em>);
+    } else if (m[12]) {
       out.push(
         <em key={k()} className="term">
           {renderInline(token.slice(2, -2), ctx)}
         </em>
       );
-    } else if (m[11]) {
+    } else if (m[13]) {
       // Colour only — the rest of the run keeps its own formatting.
       const tm = INLINE_TONE_RE.exec(token)!;
       out.push(
