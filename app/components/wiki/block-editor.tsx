@@ -734,7 +734,13 @@ export function BlockList({
         {blocks.map((block) => {
           const start = h2Count;
           h2Count += countH2(block.text);
-          return <div key={block.id}>{renderMarkdown(block.text, pageCtx, start)}</div>;
+          // display:contents — the wrapper adds no box, so a float in one block
+          // escapes into the next and following boxes flow beside it.
+          return (
+            <div key={block.id} className="wiki-block">
+              {renderMarkdown(block.text, pageCtx, start)}
+            </div>
+          );
         })}
         <div className="clear-both" />
       </div>

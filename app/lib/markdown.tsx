@@ -964,17 +964,16 @@ interface ContentsOptions {
  * a two-item vertical box titled "Overview". The `[…]` may abut the word, as in
  * `:::contents[a,b]`.
  *
- * A `mini` box may carry a pin in brackets right after the word — `mini[>v]` —
- * using the same <>c^v tokens as images/infoboxes. Brackets that don't follow
- * `mini` are the name filter, so the two never collide.
+ * A `mini` box may carry a pin in parentheses right after the word — `mini(>v)` —
+ * using the same <>c^v tokens as images/infoboxes. Parens keep the pin distinct
+ * from the `[Name, Name]` name filter, so the two never collide.
  */
 function parseContentsParam(param: string): ContentsOptions {
   let rest = param;
   let align: ImageAlign = { h: "right", v: "top", set: false };
 
-  // A pin attached to mini: `mini[>v]`. Pulled out first so its brackets aren't
-  // mistaken for the name filter.
-  const miniPin = /\bmini\s*\[([<>cv^\s]*)\]/i.exec(rest);
+  // A pin attached to mini: `mini(>v)`. Pulled out first so nothing else sees it.
+  const miniPin = /\bmini\s*\(([<>cv^\s]*)\)/i.exec(rest);
   if (miniPin) {
     const marker = miniPin[1].trim();
     if (marker) {

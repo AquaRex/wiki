@@ -364,6 +364,30 @@
   font-style: italic;
 }
 
+/*
+ * The per-block wrapper carries no box, so a float (an :::infobox, a floated
+ * image, or a :::contents mini) in one block escapes into the following blocks
+ * and their content flows beside it rather than starting below.
+ */
+.wiki .wiki-block {
+  display: contents;
+}
+/*
+ * Block-level boxes establish their own formatting context so they sit BESIDE a
+ * float — shrinking to the space left of it — instead of sliding under it and
+ * letting the float paint on top. Plain paragraphs already wrap around a float;
+ * only bordered/background boxes need this. Boxes that are already flex/grid
+ * (callout-box, flow, infobox) make their own context, and floats are excluded.
+ */
+.wiki .callout,
+.wiki .note,
+.wiki .quote-box,
+.wiki .code,
+.wiki table,
+.wiki ol.build,
+.wiki .contents-box:not(.mini) {
+  display: flow-root;
+}
 .wiki .callout {
   background: var(--surface);
   border: 1px solid var(--border-strong);
