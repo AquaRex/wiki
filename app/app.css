@@ -912,9 +912,24 @@
   border-bottom: none;
 }
 
-/* Term definitions ({{TypeDef}}). A bare def is a box identical to a variable
-   def; a term note reads like a reference but pops a styled overlay on hover. */
+/* Term definition ({{TypeDef}}) — a neutral boxed tag (dark slate), distinct
+   from the orange variable/reference boxes. */
 .wiki .termdef {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: #1c222c;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 2px 8px;
+  color: #e6e9ee;
+  font-weight: 600;
+  white-space: nowrap;
+  scroll-margin-top: 100px;
+}
+/* Term reference and note — the orange VarDef box look (border, accent bg, text).
+   A note additionally pops a styled overlay on hover. */
+.wiki .termref,
+.wiki .termnote {
   font-family: var(--font-mono);
   font-size: 0.85em;
   background: var(--accent-soft);
@@ -924,28 +939,22 @@
   color: var(--waccent);
   font-weight: 600;
   white-space: nowrap;
-  scroll-margin-top: 100px;
-}
-/* References and notes read as orange links, like a variable reference. */
-.wiki a.termref,
-.wiki .termnote {
-  color: var(--waccent);
   text-decoration: none;
-  border-bottom: 1px dotted var(--accent-line);
   cursor: pointer;
   position: relative;
 }
-.wiki a.termref:hover,
+.wiki .termref:hover,
 .wiki .termnote:hover {
-  background: var(--accent-soft);
-  border-bottom-style: solid;
+  border-color: var(--waccent);
 }
 .wiki .termnote {
   cursor: help;
 }
 .wiki .termref.missing {
+  background: transparent;
   color: var(--crit);
-  border-bottom: 1px dashed var(--crit);
+  border-color: var(--crit);
+  border-style: dashed;
   cursor: help;
 }
 /* The hover explanation overlay — orange border, brown background, white text,
