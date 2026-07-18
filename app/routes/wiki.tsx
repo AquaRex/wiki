@@ -8,11 +8,11 @@ import {
   pathInProject,
   projectDisplayName,
   projectOf,
+  resolveTermsForPage,
+  resolveVariablesForPage,
   type AccessLevel,
   type PageSummary,
   type RootMeta,
-  type VariableDef,
-  type TermDef,
   type WikiPage,
 } from "~/lib/shared";
 import { getStore } from "~/lib/store";
@@ -70,20 +70,13 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const pagePath = splat.includes("/") ? splat : `${splat}/Home`;
   const page = await store.getPage(pagePath);
   const project = page ? projectOf(page.path) : projectOf(splat);
-  const variables = await store.getVariables();
-  const projectVariables: Record<string, VariableDef> = {};
-  for (const def of Object.values(variables)) {
-    if (pathInProject(def.page, project)) {
-      projectVariables[def.name] = def;
-    }
-  }
-  const terms = await store.getTerms();
-  const projectTerms: Record<string, TermDef> = {};
-  for (const def of Object.values(terms)) {
-    if (pathInProject(def.page, project)) {
-      projectTerms[def.name] = def;
-    }
-  }
+  const currentPath = page?.path ?? pagePath;
+  // Resolve defs as seen from THIS page: its own local defs win over globals of
+  // the same name, and a shadowed global is kept for the local chip's hover.
+  const variableDefs = (await store.getVariableDefs()).filter((d) => pathInProject(d.page, project));
+  const projectVariables = resolveVariablesForPage(variableDefs, currentPath);
+  const termDefs = (await store.getTermDefs()).filter((d) => pathInProject(d.page, project));
+  const projectTerms = resolveTermsForPage(termDefs, currentPath);
 
   return {
     landing: false as const,

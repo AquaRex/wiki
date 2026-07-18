@@ -1040,6 +1040,24 @@
   border-color: var(--waccent);
   cursor: pointer;
 }
+/* A bare word that matches a variable/term: orange text, no box. Hover reveals
+   the card; click jumps to the definition. Keeps prose readable inline. */
+.wiki .varinline {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--waccent);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  white-space: normal;
+  cursor: pointer;
+}
+.wiki a.varinline:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 2px;
+}
 .wiki .termnote,
 .wiki .magicval[title] {
   cursor: help;

@@ -9,6 +9,9 @@ export interface RenderVariable {
   description: string;
   page: string;
   blockId: string;
+  local?: boolean;
+  /** The shadowed global def, when this local one overrides a global. */
+  global?: RenderVariable;
 }
 
 export interface RenderTerm {
@@ -16,6 +19,8 @@ export interface RenderTerm {
   explanation: string;
   page: string;
   blockId: string;
+  local?: boolean;
+  global?: RenderTerm;
 }
 
 export interface RenderContext {
@@ -499,7 +504,7 @@ const LINE_TONE_RE = /^::(error|warn|good|tips|muted)\b[ \t]*([\s\S]*)$/;
 
 // Mirrors DEF_RE in shared.ts — name, value, description, then the optional
 // "private" flag that keeps the definition out of the All variables index.
-const DEF_INNER_RE = /^\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}$/;
+const DEF_INNER_RE = /^\{\{def:(local:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}$/;
 
 /* ---------------------------------------------------------------- */
 /* Chip — the shared primitive for variable & term defs/refs/notes.   */
@@ -563,14 +568,17 @@ function Chip({
   );
 }
 
-/** Variable references become a link chip showing just the name. */
+/** The hover card markup for a variable: name = value — description. */
+function variableCard(def: RenderVariable): string {
+  return `**${def.name}**${def.value ? ` = :white[${def.value}]` : ""}${def.description ? ` — ${def.description}` : ""}`;
+}
+
+/** Variable references ({{name}}) become a boxed link chip showing just the name. */
 function variableLink(ctx: RenderContext, name: string, label: React.ReactNode): React.ReactNode {
   const def = ctx.variables[name];
   if (!def) {
     return null;
   }
-  // The card shows the value and (formatted) description; the value renders white.
-  const description = `**${def.name}** = :white[${def.value}]${def.description ? ` — ${def.description}` : ""}`;
   const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
   return (
     <Chip
@@ -578,7 +586,30 @@ function variableLink(ctx: RenderContext, name: string, label: React.ReactNode):
       ctx={ctx}
       variant="varref"
       label={label}
-      description={description}
+      description={variableCard(def)}
+      to={`/${def.page}#var-${name}`}
+      preventScrollReset={samePage}
+    />
+  );
+}
+
+/**
+ * A bare word matching a variable name — orange text, hover for value and
+ * description, click to jump to the definition. Unlike {{name}} it's not boxed.
+ */
+function variableInlineLink(ctx: RenderContext, name: string): React.ReactNode {
+  const def = ctx.variables[name];
+  if (!def) {
+    return name;
+  }
+  const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
+  return (
+    <Chip
+      key={k()}
+      ctx={ctx}
+      variant="varinline"
+      label={name}
+      description={variableCard(def)}
       to={`/${def.page}#var-${name}`}
       preventScrollReset={samePage}
     />
@@ -590,9 +621,9 @@ function termId(name: string): string {
   return `term-${slugify(name)}`;
 }
 
-/** Parses the inner of a {{TermDef|TermNote|TermRef(...)}} token. */
+/** Parses the inner of a {{TermDef|TermNote|TermRef(...)}} token; strips local:. */
 function parseTermToken(token: string): { name: string; explanation: string } {
-  const inner = token.replace(/^\{\{Term(?:Def|Note|Ref)\(/, "").replace(/\)\}\}$/, "");
+  const inner = token.replace(/^\{\{Term(?:Def|Note|Ref)\(/, "").replace(/\)\}\}$/, "").replace(/^local:/, "");
   const pipe = inner.indexOf("|");
   return {
     name: (pipe === -1 ? inner : inner.slice(0, pipe)).trim(),
@@ -600,23 +631,37 @@ function parseTermToken(token: string): { name: string; explanation: string } {
   };
 }
 
-// {{TermDef(Name)}} — a neutral boxed anchor. Notes are a separate token.
+// {{TermDef(Name)}} — a neutral boxed anchor. Notes are a separate token. A local
+// def that shadows a global hovers/links the global (see the vardef equivalent).
 function renderTermDef(ctx: RenderContext, token: string): React.ReactNode {
   const { name } = parseTermToken(token);
-  return <Chip key={k()} ctx={ctx} variant="termdef" label={renderInline(name, ctx)} id={termId(name)} />;
+  const shadowed = ctx.terms?.[name]?.global;
+  return (
+    <Chip
+      key={k()}
+      ctx={ctx}
+      variant="termdef"
+      label={renderInline(name, ctx)}
+      id={termId(name)}
+      description={shadowed?.explanation}
+      to={shadowed ? `/${shadowed.page}#${termId(name)}` : undefined}
+    />
+  );
 }
 
 // {{TermNote(Name|explanation)}} — an anchor that shows its explanation on hover.
 function renderTermNote(ctx: RenderContext, token: string): React.ReactNode {
   const { name, explanation } = parseTermToken(token);
+  const shadowed = ctx.terms?.[name]?.global;
   return (
     <Chip
       key={k()}
       ctx={ctx}
       variant="termnote"
       label={renderInline(name, ctx)}
-      description={explanation}
+      description={shadowed ? shadowed.explanation : explanation}
       id={termId(name)}
+      to={shadowed ? `/${shadowed.page}#${termId(name)}` : undefined}
     />
   );
 }
@@ -646,39 +691,77 @@ function renderTermRef(ctx: RenderContext, token: string): React.ReactNode {
   );
 }
 
+/**
+ * A bare word matching a term name — orange text, hover for the explanation,
+ * click to jump to the term's definition. The inline counterpart of a variable's
+ * bare-word link.
+ */
+function termInlineLink(ctx: RenderContext, name: string): React.ReactNode {
+  const def = ctx.terms?.[name];
+  if (!def) {
+    return name;
+  }
+  const samePage = def.page.toLowerCase() === ctx.currentPath.toLowerCase();
+  return (
+    <Chip
+      key={k()}
+      ctx={ctx}
+      variant="varinline"
+      label={name}
+      description={def.explanation}
+      to={`/${def.page}#${termId(name)}`}
+      preventScrollReset={samePage}
+    />
+  );
+}
+
 function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Word-boundary regex matching every defined variable name, cached per variables map.
-const varNameRegexCache = new WeakMap<Record<string, RenderVariable>, RegExp | null>();
+// Word-boundary regex matching every defined variable AND term name, plus a
+// name→kind lookup, cached per variables map (rebuilt whenever it changes).
+const nameRegexCache = new WeakMap<Record<string, RenderVariable>, { re: RegExp; kind: Record<string, "var" | "term"> } | null>();
 
-function variableNameRegex(ctx: RenderContext): RegExp | null {
-  if (!varNameRegexCache.has(ctx.variables)) {
-    const names = Object.keys(ctx.variables);
-    varNameRegexCache.set(
+function bareNameMatcher(ctx: RenderContext) {
+  if (!nameRegexCache.has(ctx.variables)) {
+    const kind: Record<string, "var" | "term"> = {};
+    // Terms first so a variable of the same name overrides it (values win).
+    for (const name of Object.keys(ctx.terms ?? {})) {
+      kind[name] = "term";
+    }
+    for (const name of Object.keys(ctx.variables)) {
+      kind[name] = "var";
+    }
+    const names = Object.keys(kind);
+    nameRegexCache.set(
       ctx.variables,
       names.length === 0
         ? null
-        : new RegExp(
-            `(?<![\\w.-])(${names
-              .sort((a, b) => b.length - a.length)
-              .map(escapeRe)
-              .join("|")})(?![\\w-])(?!\\.[\\w-])`,
-            "g"
-          )
+        : {
+            kind,
+            re: new RegExp(
+              `(?<![\\w.-])(${names
+                .sort((a, b) => b.length - a.length)
+                .map(escapeRe)
+                .join("|")})(?![\\w-])(?!\\.[\\w-])`,
+              "g"
+            ),
+          }
     );
   }
-  return varNameRegexCache.get(ctx.variables) ?? null;
+  return nameRegexCache.get(ctx.variables) ?? null;
 }
 
-// Plain prose: bare words that exactly match a defined variable name become links to it.
+// Plain prose: bare words matching a defined variable or term name become inline
+// (orange, non-boxed) links to their definition.
 function linkifyPlain(text: string, ctx: RenderContext, out: React.ReactNode[]) {
-  const re = variableNameRegex(ctx);
-  if (!re) {
+  const matcher = bareNameMatcher(ctx);
+  if (!matcher) {
     out.push(text);
     return;
   }
+  const { re, kind } = matcher;
   re.lastIndex = 0;
   let last = 0;
   let m: RegExpExecArray | null;
@@ -686,7 +769,8 @@ function linkifyPlain(text: string, ctx: RenderContext, out: React.ReactNode[]) 
     if (m.index > last) {
       out.push(text.slice(last, m.index));
     }
-    out.push(variableLink(ctx, m[1], m[1]));
+    const name = m[1];
+    out.push(kind[name] === "term" ? termInlineLink(ctx, name) : variableInlineLink(ctx, name));
     last = m.index + m[0].length;
   }
   if (last < text.length) {
@@ -744,20 +828,34 @@ export function renderInline(
     } else if (m[2]) {
       const dm = DEF_INNER_RE.exec(token);
       if (dm) {
-        const [, name, value, desc, display] = dm;
+        const [, , name, value, desc, display] = dm;
         // A VarDef is a chip. If a custom display (4th field) is given it's used
         // verbatim (full formatting); otherwise the default shows the name and,
         // after "=", the value in white. The name is rendered without auto-link
         // so a def never turns its own name into a reference chip.
         const label = display ? (
           renderInline(display, ctx)
-        ) : (
+        ) : value ? (
           <>
             {renderInline(name, ctx, { noLinkify: true })} = <span className="val">{renderInline(value, ctx)}</span>
           </>
+        ) : (
+          renderInline(name, ctx, { noLinkify: true })
         );
+        // When this local def shadows a global, its own chip hovers the GLOBAL
+        // description and links to the GLOBAL definition — refs on the page use
+        // the local one instead (via ctx.variables resolution).
+        const shadowed = ctx.variables[name]?.global;
         out.push(
-          <Chip key={k()} ctx={ctx} variant="vardef" label={label} description={desc || ""} id={`var-${name}`} />
+          <Chip
+            key={k()}
+            ctx={ctx}
+            variant="vardef"
+            label={label}
+            description={shadowed ? variableCard(shadowed) : desc || ""}
+            id={`var-${name}`}
+            to={shadowed ? `/${shadowed.page}#var-${name}` : undefined}
+          />
         );
       } else {
         out.push(token);

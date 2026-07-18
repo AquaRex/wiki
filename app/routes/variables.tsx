@@ -14,13 +14,13 @@ export function meta({ params }: Route.MetaArgs) {
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const store = getStore();
   const requested = normalizePath(params.project);
-  const [allPages, variableMap] = await Promise.all([store.listPages(), store.getVariables()]);
+  const [allPages, variableDefs] = await Promise.all([store.listPages(), store.getVariableDefs()]);
   const projectPage = allPages.find((p) => pathInProject(p.path, requested));
   const project = projectPage ? projectPage.path.split("/")[0] : requested;
   const pages = allPages.filter((p) => pathInProject(p.path, project));
-  const variables = Object.values(variableMap)
+  const variables = variableDefs
     .filter((v) => pathInProject(v.page, project))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name) || Number(a.local) - Number(b.local));
   return { project, pages, variables };
 }
 

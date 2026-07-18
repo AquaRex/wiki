@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { renderMarkdown, countH2, extractHeadings, type RenderContext } from "~/lib/markdown";
-import { extractTerms, extractVariables, newBlockId, type WikiBlock, type WikiPage } from "~/lib/shared";
+import { collectTermDefs, collectVariableDefs, newBlockId, resolveTermsForPage, resolveVariablesForPage, type WikiBlock, type WikiPage } from "~/lib/shared";
 import { getStore } from "~/lib/store";
 
 type Segment =
@@ -124,9 +124,12 @@ const SNIPPETS: Snippet[] = [
   { label: "Link", icon: <Link2 className="size-3.5" />, text: "[label](https://example.com)", wrap: ["[", "](https://example.com)"] },
   { label: "Head image", icon: <ImageIcon className="size-3.5" />, text: "## Section title ![](/uploads/icon.png)", block: true },
   { label: "Var def", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What this variable controls}}" },
+  { label: "Var def local", icon: <Braces className="size-3.5" />, text: "{{def:local:varName=100|Only on this page}}" },
+  { label: "Var def global", icon: <Braces className="size-3.5" />, text: "{{def:varName|A global template with no value}}" },
   { label: "Var def styled", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What it controls|:good[varName] = :white[100]}}" },
   { label: "Var ref", icon: <Braces className="size-3.5" />, text: "{{varName}}" },
   { label: "Term def", icon: <Braces className="size-3.5" />, text: "{{TermDef(Hearing)}}" },
+  { label: "Term def local", icon: <Braces className="size-3.5" />, text: "{{TermDef(local:Hearing)}}" },
   { label: "Term note", icon: <Braces className="size-3.5" />, text: "{{TermNote(Hearing|A **formatted** explanation shown on hover)}}" },
   { label: "Term ref", icon: <Braces className="size-3.5" />, text: "{{TermRef(Hearing)}}" },
   { label: "Term ref note", icon: <Braces className="size-3.5" />, text: "{{TermRef(Hearing|A note shown only on this reference)}}" },
@@ -404,10 +407,14 @@ function BlockEditorPanel({
       access: "public",
       locked: false,
     };
+    // Resolve the draft's own defs for this page so a local def and its reference
+    // written in the same edit resolve immediately, locals included.
+    const draftVars = resolveVariablesForPage(collectVariableDefs([draftPage]), ctx.currentPath);
+    const draftTerms = resolveTermsForPage(collectTermDefs([draftPage]), ctx.currentPath);
     return {
       ...ctx,
-      variables: { ...ctx.variables, ...extractVariables([draftPage]) },
-      terms: { ...(ctx.terms ?? {}), ...extractTerms([draftPage]) },
+      variables: { ...ctx.variables, ...draftVars },
+      terms: { ...(ctx.terms ?? {}), ...draftTerms },
     };
   }, [ctx, draft, block.id]);
   const { mutate, busy } = useMutatePage(pagePath);

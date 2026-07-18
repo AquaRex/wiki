@@ -42,6 +42,13 @@ export interface VariableDef {
   description: string;
   page: string;
   blockId: string;
+  /** True when defined with `def:local:Name` — visible only on its own page. */
+  local: boolean;
+  /**
+   * When a local def shadows a global one of the same name, the global def is
+   * kept here: the local chip hovers/links the global, while refs use the local.
+   */
+  global?: VariableDef;
 }
 
 /**
@@ -55,6 +62,10 @@ export interface TermDef {
   explanation: string;
   page: string;
   blockId: string;
+  /** True when defined with `TermDef(local:Name)` — visible only on its own page. */
+  local: boolean;
+  /** The shadowed global term, kept when a local def overrides a global one. */
+  global?: TermDef;
 }
 
 export interface SearchResult {
@@ -255,28 +266,67 @@ export function blankPage(rawPath: string, title?: string): WikiPage {
 
 /**
  * {{def:name=value|description|custom display}}
- *
- * name/value/description are the data; the optional 4th field overrides how the
- * chip is displayed (any inline markup). Refs ({{name}}) resolve by name.
+ *   - an optional `local:` prefix scopes the def to its own page
+ *   - the value may be omitted: {{def:name|description}} declares a global with a
+ *     description but no value, a template that pages override with a local value
+ *   - the optional 4th field overrides how the chip is displayed (inline markup)
+ * Refs ({{name}}) resolve by name.
  */
-export const DEF_RE = /\{\{def:([A-Za-z0-9_.-]+)\s*=\s*([^|}]*?)\s*(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}/g;
+export const DEF_RE = /\{\{def:(local:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*)?(?:\|\s*([^|}]*?)\s*)?(?:\|\s*([^}]*?)\s*)?\}\}/g;
 
-export function extractVariables(pages: WikiPage[]): Record<string, VariableDef> {
-  const vars: Record<string, VariableDef> = {};
+/** Every variable def across the given pages, in document order. */
+export function collectVariableDefs(pages: WikiPage[]): VariableDef[] {
+  const defs: VariableDef[] = [];
   for (const page of pages) {
     for (const block of page.blocks) {
       for (const match of block.text.matchAll(DEF_RE)) {
-        vars[match[1]] = {
-          name: match[1],
-          value: match[2],
-          description: match[3] ?? "",
+        defs.push({
+          name: match[2],
+          value: match[3] ?? "",
+          description: match[4] ?? "",
           page: page.path,
           blockId: block.id,
-        };
+          local: Boolean(match[1]),
+        });
       }
     }
   }
-  return vars;
+  return defs;
+}
+
+/**
+ * Resolves the variable map as seen from `currentPath`: a page's own local def
+ * wins over a global of the same name, and the shadowed global is attached as
+ * `.global` so the local chip can still hover/link it. Passing "" (no page)
+ * yields the plain global map. Globals are last-wins across pages, matching the
+ * previous behaviour.
+ */
+export function resolveVariablesForPage(
+  defs: VariableDef[],
+  currentPath: string
+): Record<string, VariableDef> {
+  const globals: Record<string, VariableDef> = {};
+  const locals: Record<string, VariableDef> = {};
+  const here = currentPath.toLowerCase();
+  for (const def of defs) {
+    if (def.local) {
+      if (def.page.toLowerCase() === here) {
+        locals[def.name] = def;
+      }
+    } else {
+      globals[def.name] = def;
+    }
+  }
+  const out: Record<string, VariableDef> = { ...globals };
+  for (const [name, local] of Object.entries(locals)) {
+    out[name] = globals[name] ? { ...local, global: globals[name] } : local;
+  }
+  return out;
+}
+
+/** Back-compat: the plain global-only map keyed by name (no page resolution). */
+export function extractVariables(pages: WikiPage[]): Record<string, VariableDef> {
+  return resolveVariablesForPage(collectVariableDefs(pages), "");
 }
 
 /**
@@ -284,47 +334,88 @@ export function extractVariables(pages: WikiPage[]): Record<string, VariableDef>
  * {{TermNote(Name | explanation)}} — a term with a hover explanation
  * Both register the term so a {{TermRef}} can resolve to it.
  */
-export const TYPEDEF_RE = /\{\{Term(?:Def|Note)\(\s*([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^)]*?)\s*)?\)\}\}/g;
+export const TYPEDEF_RE = /\{\{Term(?:Def|Note)\(\s*(local:)?([A-Za-z0-9_.\- ]+?)\s*(?:\|\s*([^)]*?)\s*)?\)\}\}/g;
 
-/**
- * Collects every term across all pages, keyed by name. A BARE definition is the
- * canonical anchor (its page/block is the jump target); an explanation from any
- * definition of the same name is kept for the hover. So a term can be anchored
- * in one place and explained inline elsewhere, and refs still resolve correctly.
- */
-export function extractTerms(pages: WikiPage[]): Record<string, TermDef> {
-  const terms: Record<string, TermDef> = {};
+export interface RawTermDef {
+  name: string;
+  explanation: string;
+  page: string;
+  blockId: string;
+  local: boolean;
+}
+
+/** Every term def across the given pages, in document order. */
+export function collectTermDefs(pages: WikiPage[]): RawTermDef[] {
+  const defs: RawTermDef[] = [];
   for (const page of pages) {
     for (const block of page.blocks) {
       for (const match of block.text.matchAll(TYPEDEF_RE)) {
-        const name = match[1];
-        const explanation = (match[2] ?? "").trim();
-        const isBare = !explanation;
-        const existing = terms[name];
-        if (!existing) {
-          terms[name] = { name, explanation, page: page.path, blockId: block.id };
-          continue;
-        }
-        // A bare def is the canonical anchor — prefer its location. Keep whichever
-        // explanation exists so a ref can still show it on hover.
-        terms[name] = {
-          name,
-          explanation: explanation || existing.explanation,
-          page: isBare ? page.path : existing.page,
-          blockId: isBare ? block.id : existing.blockId,
-        };
+        defs.push({
+          name: match[2],
+          explanation: (match[3] ?? "").trim(),
+          page: page.path,
+          blockId: block.id,
+          local: Boolean(match[1]),
+        });
       }
     }
   }
+  return defs;
+}
+
+/**
+ * Merges term defs of one scope by name. A BARE def is the canonical anchor (its
+ * page/block is the jump target); an explanation from any def of the same name
+ * is kept for the hover — so a term can be anchored in one place and explained
+ * elsewhere, and refs still resolve.
+ */
+function mergeTerms(defs: RawTermDef[]): Record<string, TermDef> {
+  const terms: Record<string, TermDef> = {};
+  for (const def of defs) {
+    const isBare = !def.explanation;
+    const existing = terms[def.name];
+    if (!existing) {
+      terms[def.name] = { name: def.name, explanation: def.explanation, page: def.page, blockId: def.blockId, local: def.local };
+      continue;
+    }
+    terms[def.name] = {
+      name: def.name,
+      explanation: def.explanation || existing.explanation,
+      page: isBare ? def.page : existing.page,
+      blockId: isBare ? def.blockId : existing.blockId,
+      local: def.local,
+    };
+  }
   return terms;
+}
+
+/**
+ * Resolves the term map as seen from `currentPath`: a page's own local term wins
+ * over a global of the same name, with the shadowed global attached as `.global`.
+ * Passing "" yields the plain global map.
+ */
+export function resolveTermsForPage(defs: RawTermDef[], currentPath: string): Record<string, TermDef> {
+  const here = currentPath.toLowerCase();
+  const globals = mergeTerms(defs.filter((d) => !d.local));
+  const locals = mergeTerms(defs.filter((d) => d.local && d.page.toLowerCase() === here));
+  const out: Record<string, TermDef> = { ...globals };
+  for (const [name, local] of Object.entries(locals)) {
+    out[name] = globals[name] ? { ...local, global: globals[name] } : local;
+  }
+  return out;
+}
+
+/** Back-compat: the plain global-only term map keyed by name. */
+export function extractTerms(pages: WikiPage[]): Record<string, TermDef> {
+  return resolveTermsForPage(collectTermDefs(pages), "");
 }
 
 function plainText(markup: string): string {
   return markup
     .replace(/^```.*$/gm, " ")
     .replace(/^:::.*$/gm, " ")
-    .replace(/\{\{Term(?:Def|Note|Ref)\(\s*([^|)]+?)\s*(?:\|[^)]*)?\)\}\}/g, "$1")
-    .replace(/\{\{def:([^=}]+)=([^|}]*?)\s*(?:\|([^}]*))?\}\}/g, "$1 = $2 $3")
+    .replace(/\{\{Term(?:Def|Note|Ref)\(\s*(?:local:)?([^|)]+?)\s*(?:\|[^)]*)?\)\}\}/g, "$1")
+    .replace(/\{\{def:(?:local:)?([^=|}]+?)\s*(?:=\s*([^|}]*?))?\s*(?:\|([^}]*))?\}\}/g, "$1 $2 $3")
     .replace(/\{\{(-?\d[^|}]*)\|([^}]*)\}\}/g, "$1 $2")
     .replace(/\{\{([^|}]+)\|([^}]*)\}\}/g, "$2")
     .replace(/\{\{([^}]+)\}\}/g, "$1")

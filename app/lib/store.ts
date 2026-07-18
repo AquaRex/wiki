@@ -2,6 +2,8 @@ import { supabase } from "./supabase";
 import { wikiConfig } from "~/wiki.config";
 import {
   blankPage,
+  collectTermDefs,
+  collectVariableDefs,
   emptyProjectMeta,
   extractTerms,
   extractVariables,
@@ -14,6 +16,7 @@ import {
   type PageMove,
   type PageSummary,
   type ProjectMeta,
+  type RawTermDef,
   type RootMeta,
   type SearchResult,
   type VariableDef,
@@ -39,6 +42,9 @@ export interface WikiStore {
   movePages(moves: PageMove[]): Promise<void>;
   getVariables(): Promise<Record<string, VariableDef>>;
   getTerms(): Promise<Record<string, TermDef>>;
+  /** Raw def lists (globals and locals) for per-page scope resolution. */
+  getVariableDefs(): Promise<VariableDef[]>;
+  getTermDefs(): Promise<RawTermDef[]>;
   search(query: string): Promise<SearchResult[]>;
   /**
    * Verifies a locked page's password server-side and, on success, returns the
@@ -421,6 +427,16 @@ class SupabaseStore implements WikiStore {
   async getTerms() {
     const pages = await this.pages();
     return extractTerms(Array.from(pages.values()));
+  }
+
+  async getVariableDefs() {
+    const pages = await this.pages();
+    return collectVariableDefs(Array.from(pages.values()));
+  }
+
+  async getTermDefs() {
+    const pages = await this.pages();
+    return collectTermDefs(Array.from(pages.values()));
   }
 
   async search(query: string) {
