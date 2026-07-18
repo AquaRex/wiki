@@ -383,7 +383,7 @@
 .wiki .note,
 .wiki .quote-box,
 .wiki .code,
-.wiki table,
+.wiki .table-scroll,
 .wiki ol.build,
 .wiki .contents-box:not(.mini) {
   display: flow-root;
