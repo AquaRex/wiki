@@ -469,9 +469,56 @@
   padding: 1px 6px;
   flex: none;
 }
+/* "mini" — a compact card that floats beside the text like an infobox. It pins
+   with the same <>c^v tokens (mini[>v]); default is float right, top. */
+.wiki .contents-box.mini {
+  float: right;
+  clear: right;
+  width: 260px;
+  margin: 22px 0 20px 28px;
+  padding: 16px 18px;
+  font-size: 13px;
+}
+.wiki .contents-box.mini ul {
+  columns: 1;
+}
+.wiki .contents-box.mini li {
+  padding: 2px 0;
+}
+.wiki .contents-box.mini .label {
+  font-size: 11px;
+}
+.wiki .contents-box.mini.h-left {
+  float: left;
+  clear: left;
+  margin: 22px 28px 20px 0;
+}
+.wiki .contents-box.mini.h-right {
+  float: right;
+  clear: right;
+  margin: 22px 0 20px 28px;
+}
+.wiki .contents-box.mini.h-center {
+  float: none;
+  clear: both;
+  margin: 22px auto;
+}
+.wiki .contents-box.mini.v-bottom {
+  clear: both;
+}
 @media (max-width: 640px) {
   .wiki .contents-box ul {
     columns: 1;
+  }
+}
+@media (max-width: 720px) {
+  .wiki .contents-box.mini,
+  .wiki .contents-box.mini.h-left,
+  .wiki .contents-box.mini.h-right,
+  .wiki .contents-box.mini.h-center {
+    float: none;
+    width: 100%;
+    margin: 18px 0;
   }
 }
 

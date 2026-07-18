@@ -947,6 +947,10 @@ interface ContentsOptions {
   all: boolean;
   /** Lay the list out as one vertical column instead of flowing into columns. */
   vertical: boolean;
+  /** Render as a compact card that floats beside the text, like an infobox. */
+  mini: boolean;
+  /** Pin for a mini box — set via `mini[<v]`; only meaningful when mini. */
+  align: ImageAlign;
   /** A hand-picked list of heading names to show, in the given order. */
   only: string[] | null;
   /** The box heading text (everything left after the keywords/list are removed). */
@@ -955,23 +959,46 @@ interface ContentsOptions {
 
 /**
  * Parses the text after `:::contents`. In any order it accepts the keywords
- * `all` and `vertical`, an optional `[Name, Name]` filter list, and free header
- * text — so `:::contents[Intro,Setup] vertical Overview` is understood as a
- * two-item vertical box titled "Overview". The `[…]` may abut the word, as in
- * `:::contents[a,b]`, since that reads naturally.
+ * `all`, `vertical` and `mini`, an optional `[Name, Name]` filter list, and free
+ * header text — so `:::contents[Intro,Setup] vertical Overview` is understood as
+ * a two-item vertical box titled "Overview". The `[…]` may abut the word, as in
+ * `:::contents[a,b]`.
+ *
+ * A `mini` box may carry a pin in brackets right after the word — `mini[>v]` —
+ * using the same <>c^v tokens as images/infoboxes. Brackets that don't follow
+ * `mini` are the name filter, so the two never collide.
  */
 function parseContentsParam(param: string): ContentsOptions {
   let rest = param;
+  let align: ImageAlign = { h: "right", v: "top", set: false };
+
+  // A pin attached to mini: `mini[>v]`. Pulled out first so its brackets aren't
+  // mistaken for the name filter.
+  const miniPin = /\bmini\s*\[([<>cv^\s]*)\]/i.exec(rest);
+  if (miniPin) {
+    const marker = miniPin[1].trim();
+    if (marker) {
+      align = splitImageAlign(`x ${marker}`).align;
+    }
+    rest = rest.slice(0, miniPin.index) + "mini" + rest.slice(miniPin.index + miniPin[0].length);
+  }
+
   let only: string[] | null = null;
   const list = /\[([^\]]*)\]/.exec(rest);
   if (list) {
     only = list[1].split(",").map((s) => s.trim()).filter(Boolean);
     rest = rest.slice(0, list.index) + rest.slice(list.index + list[0].length);
   }
+
   const all = /\ball\b/i.test(rest);
   const vertical = /\bvertical\b/i.test(rest);
-  const header = rest.replace(/\ball\b/i, "").replace(/\bvertical\b/i, "").trim();
-  return { all, vertical, only, header };
+  const mini = /\bmini\b/i.test(rest);
+  const header = rest
+    .replace(/\ball\b/i, "")
+    .replace(/\bvertical\b/i, "")
+    .replace(/\bmini\b/i, "")
+    .trim();
+  return { all, vertical, mini, align, only, header };
 }
 
 function Heading({
@@ -1132,8 +1159,16 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
       }
       // A "^ subheader" line in the body becomes the box's subtext, like a heading's.
       const sub = dir.lines.map((l) => l.trim()).find((l) => l.startsWith("^ "));
+      const cls = [
+        "contents-box",
+        opts.vertical && "vertical",
+        opts.mini && "mini",
+        opts.mini && opts.align.set && alignClasses(opts.align),
+      ]
+        .filter(Boolean)
+        .join(" ");
       return (
-        <nav key={k()} className={`contents-box${opts.vertical ? " vertical" : ""}`} aria-label="Contents">
+        <nav key={k()} className={cls} aria-label="Contents">
           <p className="label">{opts.header ? renderInline(opts.header, ctx) : "Contents"}</p>
           {sub && <p className="toc-sub">{renderInline(sub.slice(2), ctx)}</p>}
           <ul>
