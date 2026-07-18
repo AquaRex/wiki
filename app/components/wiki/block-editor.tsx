@@ -124,6 +124,7 @@ const SNIPPETS: Snippet[] = [
   { label: "Link", icon: <Link2 className="size-3.5" />, text: "[label](https://example.com)", wrap: ["[", "](https://example.com)"] },
   { label: "Head image", icon: <ImageIcon className="size-3.5" />, text: "## Section title ![](/uploads/icon.png)", block: true },
   { label: "Var def", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What this variable controls}}" },
+  { label: "Var def styled", icon: <Braces className="size-3.5" />, text: "{{def:varName=100|What it controls|:good[varName] = :white[100]}}" },
   { label: "Var ref", icon: <Braces className="size-3.5" />, text: "{{varName}}" },
   { label: "Term def", icon: <Braces className="size-3.5" />, text: "{{TermDef(Hearing)}}" },
   { label: "Term note", icon: <Braces className="size-3.5" />, text: "{{TermNote(Hearing|A **formatted** explanation shown on hover)}}" },

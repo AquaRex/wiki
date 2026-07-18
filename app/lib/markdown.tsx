@@ -512,7 +512,8 @@ function Chip({
     : {};
   const card = description && pos && (
     <span className="hovercard" style={{ left: pos.x + 12, top: pos.y + 16 }} role="tooltip">
-      <span className="wiki">{renderInline(description, ctx)}</span>
+      {/* noLinkify: a card shouldn't turn every bare word into a variable chip. */}
+      <span className="wiki">{renderInline(description, ctx, { noLinkify: true })}</span>
     </span>
   );
   const cls = `chip ${variant}`;
@@ -685,14 +686,27 @@ function renderCodeSpan(ctx: RenderContext, content: string): React.ReactNode {
   return <code key={k()}>{content}</code>;
 }
 
-export function renderInline(text: string, ctx: RenderContext): React.ReactNode[] {
+export function renderInline(
+  text: string,
+  ctx: RenderContext,
+  opts?: { noLinkify?: boolean }
+): React.ReactNode[] {
+  // A definition's own name must not auto-link to itself, so callers can turn
+  // off bare-name variable linking while keeping all other inline formatting.
+  const plain = (t: string, o: React.ReactNode[]) => {
+    if (opts?.noLinkify) {
+      o.push(t);
+    } else {
+      linkifyPlain(t, ctx, o);
+    }
+  };
   const out: React.ReactNode[] = [];
   let last = 0;
   const inlineRe = new RegExp(INLINE_SRC, "g");
   let m: RegExpExecArray | null;
   while ((m = inlineRe.exec(text)) !== null) {
     if (m.index > last) {
-      linkifyPlain(text.slice(last, m.index), ctx, out);
+      plain(text.slice(last, m.index), out);
     }
     const token = m[0];
     if (m[1]) {
@@ -700,15 +714,20 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
     } else if (m[2]) {
       const dm = DEF_INNER_RE.exec(token);
       if (dm) {
-        // A VarDef is a chip whose label is "name = value" — the value in white
-        // is just default formatting; the label accepts any inline markup.
-        const label = (
+        const [, name, value, desc, display] = dm;
+        // A VarDef is a chip. If a custom display (4th field) is given it's used
+        // verbatim (full formatting); otherwise the default shows the name and,
+        // after "=", the value in white. The name is rendered without auto-link
+        // so a def never turns its own name into a reference chip.
+        const label = display ? (
+          renderInline(display, ctx)
+        ) : (
           <>
-            {renderInline(dm[1], ctx)} = <span className="val">{renderInline(dm[2], ctx)}</span>
+            {renderInline(name, ctx, { noLinkify: true })} = <span className="val">{renderInline(value, ctx)}</span>
           </>
         );
         out.push(
-          <Chip key={k()} ctx={ctx} variant="vardef" label={label} description={dm[3] || ""} id={`var-${dm[1]}`} />
+          <Chip key={k()} ctx={ctx} variant="vardef" label={label} description={desc || ""} id={`var-${name}`} />
         );
       } else {
         out.push(token);
@@ -802,7 +821,7 @@ export function renderInline(text: string, ctx: RenderContext): React.ReactNode[
     last = m.index + token.length;
   }
   if (last < text.length) {
-    linkifyPlain(text.slice(last), ctx, out);
+    plain(text.slice(last), out);
   }
   return out;
 }
@@ -880,7 +899,7 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
       const cls = dir.type === "callout" ? "callout core" : "note";
       return (
         <div key={k()} className={cls}>
-          {dir.param && <p className="label">{dir.param}</p>}
+          {dir.param && <p className="label">{renderInline(dir.param, ctx)}</p>}
           {renderMarkdown(body.join("\n"), ctx)}
         </div>
       );
@@ -893,7 +912,7 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
     case "quote": {
       return (
         <div key={k()} className="quote-box">
-          {dir.param && <p className="label">{dir.param}</p>}
+          {dir.param && <p className="label">{renderInline(dir.param, ctx)}</p>}
           {renderMarkdown(body.join("\n"), ctx)}
         </div>
       );
@@ -943,13 +962,13 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
       }
       return (
         <aside key={k()} className="infobox">
-          {dir.param && <div className="ib-title">{dir.param}</div>}
+          {dir.param && <div className="ib-title">{renderInline(dir.param, ctx)}</div>}
           {image && <Asset ctx={ctx} src={image} alt={dir.param} />}
           {rows.length > 0 && (
             <div className="ib-rows">
               {rows.map((row) => (
                 <React.Fragment key={k()}>
-                  <div className="ib-label">{row.label}</div>
+                  <div className="ib-label">{renderInline(row.label, ctx)}</div>
                   <div className="ib-value">{renderInline(row.value, ctx)}</div>
                 </React.Fragment>
               ))}
