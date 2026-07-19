@@ -6,6 +6,7 @@ import {
   collectVariableDefs,
   emptyProjectMeta,
   type BoardData,
+  type SheetData,
   extractTerms,
   extractVariables,
   isRelLocked,
@@ -50,6 +51,10 @@ export interface WikiStore {
   getBoard(pagePath: string, boardKey: string): Promise<BoardData | null>;
   /** Saves a roadmap board (signed-in only, refused on a locked/withheld page). */
   saveBoard(pagePath: string, boardKey: string, data: BoardData): Promise<void>;
+  /** A :::cells sheet's saved data, or null if it has never been saved. */
+  getSheet(pagePath: string, sheetKey: string): Promise<SheetData | null>;
+  /** Saves a sheet (signed-in only, refused on a locked/withheld page). */
+  saveSheet(pagePath: string, sheetKey: string, data: SheetData): Promise<void>;
   search(query: string): Promise<SearchResult[]>;
   /**
    * Verifies a locked page's password server-side and, on success, returns the
@@ -481,6 +486,42 @@ class SupabaseStore implements WikiStore {
       { onConflict: "project_slug,rel,board_key" }
     );
     fail("Could not save board", error);
+  }
+
+  async getSheet(pagePath: string, sheetKey: string): Promise<SheetData | null> {
+    const { project, rel } = splitPath(normalizePath(pagePath));
+    const { data, error } = await supabase
+      .from("sheets")
+      .select("data")
+      .eq("project_slug", project)
+      .eq("rel", rel)
+      .eq("sheet_key", sheetKey)
+      .maybeSingle();
+    fail("Could not load sheet", error);
+    return (data?.data as SheetData) ?? null;
+  }
+
+  async saveSheet(pagePath: string, sheetKey: string, sheet: SheetData): Promise<void> {
+    const page = await this.getPage(pagePath);
+    if (!page) {
+      throw new Error(`Page not found: ${pagePath}`);
+    }
+    if (page.locked) {
+      throw new Error("This page is locked — unlock it before editing its sheet.");
+    }
+    const { project, rel } = splitPath(normalizePath(pagePath));
+    const { error } = await supabase.from("sheets").upsert(
+      {
+        project_slug: project,
+        rel,
+        sheet_key: sheetKey,
+        data: sheet,
+        is_private: page.access !== "public",
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "project_slug,rel,sheet_key" }
+    );
+    fail("Could not save sheet", error);
   }
 
   async search(query: string) {

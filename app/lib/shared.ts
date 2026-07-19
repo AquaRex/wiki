@@ -148,6 +148,69 @@ export function defaultBoard(): BoardData {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Spreadsheet (:::cells) data model                                   */
+/* ------------------------------------------------------------------ */
+
+/** How a cell's value is interpreted / displayed. */
+export type SheetCellType = "normal" | "price" | "list";
+
+/** One populated cell. Empty cells are absent from the sparse map entirely. */
+export interface SheetCell {
+  /** Raw value the user typed (or the chosen list option). */
+  v?: string;
+  /** Text colour — a wiki tone name (good/warn/…) or a #hex string; "" = default. */
+  color?: string;
+  /** Background colour — a wiki tone name or #hex; "" = default. */
+  bg?: string;
+  /** Per-cell type override. Falls back to the column type, then "normal". */
+  type?: SheetCellType;
+}
+
+/** The whole spreadsheet, stored as jsonb in the sheets table. */
+export interface SheetData {
+  /** Number of columns (A, B, …). */
+  cols: number;
+  /** Number of rows (1, 2, …). */
+  rows: number;
+  /** Sparse cell map keyed by A1-style ref, e.g. "A1", "C4". */
+  cells: Record<string, SheetCell>;
+  /** Custom column widths in px, keyed by 0-based column index. */
+  colWidths?: Record<number, number>;
+  /** Custom row heights in px, keyed by 0-based row index. */
+  rowHeights?: Record<number, number>;
+  /** Default type per column (0-based index) when a cell has no own type. */
+  colTypes?: Record<number, SheetCellType>;
+  /** Allowed options for a "list"-typed column, keyed by 0-based column index. */
+  colLists?: Record<number, string[]>;
+}
+
+export const SHEET_DEFAULT_COLS = 26;
+export const SHEET_DEFAULT_ROWS = 50;
+export const SHEET_DEFAULT_COL_WIDTH = 110;
+export const SHEET_DEFAULT_ROW_HEIGHT = 30;
+
+/** A blank sheet used when a :::cells has no saved data yet. */
+export function defaultSheet(): SheetData {
+  return { cols: SHEET_DEFAULT_COLS, rows: SHEET_DEFAULT_ROWS, cells: {} };
+}
+
+/** "A", "B", … "Z", "AA", … for a 0-based column index. */
+export function colName(index: number): string {
+  let n = index;
+  let name = "";
+  do {
+    name = String.fromCharCode(65 + (n % 26)) + name;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return name;
+}
+
+/** A1-style reference for a 0-based (col, row). */
+export function cellRef(col: number, row: number): string {
+  return `${colName(col)}${row + 1}`;
+}
+
 export interface SearchResult {
   path: string;
   title: string;

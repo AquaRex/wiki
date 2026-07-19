@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { UnrealGraph } from "~/components/wiki/unreal-graph";
 import { Roadmap } from "~/components/wiki/roadmap";
+import { Sheet } from "~/components/wiki/sheet";
 import { openLightbox } from "~/components/wiki/lightbox";
 
 export interface RenderVariable {
@@ -1169,6 +1170,12 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
     // page + key, loaded after the page (RLS withholds a private page's board).
     case "roadmap": {
       return <Roadmap key={k()} pagePath={ctx.currentPath} boardKey={dir.param} ctx={ctx} />;
+    }
+    // A spreadsheet grid. `dir.param` is an optional sheet key so one page can
+    // hold several sheets; the sheet's data lives in its own table row, keyed by
+    // page + key, loaded after the page (RLS withholds a private page's sheet).
+    case "cells": {
+      return <Sheet key={k()} pagePath={ctx.currentPath} sheetKey={dir.param} />;
     }
     case "infobox": {
       // The title may carry an image-style pin token — `:::infobox Name >v` —
