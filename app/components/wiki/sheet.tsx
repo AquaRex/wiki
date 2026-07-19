@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { getStore } from "~/lib/store";
 import { useAuth } from "~/lib/auth";
+import { makeFormulaEngine } from "~/lib/sheet-formula";
 import {
   Dialog,
   DialogContent,
@@ -61,6 +62,29 @@ const TONE_SWATCHES: { name: string; label: string; css: string }[] = [
   { name: "tips", label: "Tips", css: "var(--info)" },
   { name: "muted", label: "Muted", css: "var(--text-faint)" },
   { name: "white", label: "White", css: "#ffffff" },
+];
+
+/** The site's own palette (dark theme), so header/cell colours match the wiki.
+ *  Stored verbatim as #hex. Backgrounds first, then accents and text tones. */
+const SITE_SWATCHES: { hex: string; label: string }[] = [
+  { hex: "#0f1319", label: "Page bg" },
+  { hex: "#10141a", label: "Deep" },
+  { hex: "#12171e", label: "Code bg" },
+  { hex: "#161b23", label: "Surface" },
+  { hex: "#1c222c", label: "Surface 2" },
+  { hex: "#29313d", label: "Border" },
+  { hex: "#38414f", label: "Border strong" },
+  { hex: "#2a2113", label: "Accent soft" },
+  { hex: "#b9822f", label: "Accent line" },
+  { hex: "#bb8a43", label: "Gold" },
+  { hex: "#da781c", label: "Orange" },
+  { hex: "#e5a64b", label: "Accent" },
+  { hex: "#57b382", label: "Green" },
+  { hex: "#e07070", label: "Red" },
+  { hex: "#d99b3f", label: "Amber" },
+  { hex: "#6aa9dd", label: "Blue" },
+  { hex: "#e7eaf0", label: "Text" },
+  { hex: "#9aa3b2", label: "Text dim" },
 ];
 
 const PRESETS_KEY = "wiki-sheet-color-presets";
@@ -178,6 +202,13 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   // plain click then collapses to the pressed cell.
   const pressInside = useRef(false);
   const pendingCollapse = useRef<{ c: number; r: number } | null>(null);
+  // Dragging a column letter / row number to reorder: the dragged index range.
+  const headerDrag = useRef<{ kind: "col" | "row"; a: number; b: number } | null>(null);
+  const [headerDropTarget, setHeaderDropTarget] = useState<{ kind: "col" | "row"; i: number } | null>(null);
+  // The last internal copy, kept so an internal paste restores colours/types the
+  // plain-text OS clipboard can't carry. `tsv` is what we wrote to the OS
+  // clipboard; a paste whose text matches it is known to be our own copy.
+  const lastCopy = useRef<{ tsv: string; cells: (SheetCell | undefined)[][] } | null>(null);
   // A cell only becomes HTML5-draggable after a short press-and-hold, so the
   // default press gesture stays selection. Moving to select disarms it.
   const [armedCell, setArmedCell] = useState<{ c: number; r: number } | null>(null);
@@ -435,11 +466,6 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
 
   /* ---- clipboard (TSV interop with Excel / Sheets) ---- */
 
-  // The last internal copy, kept so an internal paste restores colours/types the
-  // plain-text OS clipboard can't carry. `tsv` is what we wrote to the OS
-  // clipboard; a paste whose text matches it is known to be our own copy.
-  const lastCopy = useRef<{ tsv: string; cells: (SheetCell | undefined)[][] } | null>(null);
-
   const buildCopy = (): { tsv: string; cells: (SheetCell | undefined)[][] } | null => {
     if (!sel) {
       return null;
@@ -601,6 +627,67 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     setSel(null);
   };
 
+  /** Reorders columns c1..c2 to sit before `target`, remapping cells and the
+   *  per-column sizing/type/list maps. Follows the moved block with selection. */
+  const moveColumns = (c1: number, c2: number, target: number) => {
+    if (target >= c1 && target <= c2) {
+      return; // dropped onto itself
+    }
+    const order: number[] = [];
+    for (let i = 0; i < cols; i++) {
+      order.push(i);
+    }
+    const count = c2 - c1 + 1;
+    const moving = order.splice(c1, count);
+    const pos = order.indexOf(target);
+    const insertAt = pos === -1 ? order.length : pos;
+    order.splice(insertAt, 0, ...moving);
+    // order[newIndex] = oldIndex → invert to oldIndex → newIndex.
+    const newOf: Record<number, number> = {};
+    order.forEach((oldC, newC) => (newOf[oldC] = newC));
+
+    const next = cloneSheet();
+    const cells: Record<string, SheetCell> = {};
+    for (const [ref, cell] of Object.entries(next.cells)) {
+      const { c, r } = parseRef(ref);
+      cells[cellRef(newOf[c] ?? c, r)] = cell;
+    }
+    next.cells = cells;
+    next.colWidths = remapIndexMap(next.colWidths, newOf);
+    next.colTypes = remapIndexMap(next.colTypes, newOf);
+    next.colLists = remapIndexMap(next.colLists, newOf);
+    commit(next);
+    setSel({ c1: insertAt, c2: insertAt + count - 1, r1: 0, r2: rows - 1 });
+  };
+
+  const moveRows = (r1: number, r2: number, target: number) => {
+    if (target >= r1 && target <= r2) {
+      return;
+    }
+    const order: number[] = [];
+    for (let i = 0; i < rows; i++) {
+      order.push(i);
+    }
+    const count = r2 - r1 + 1;
+    const moving = order.splice(r1, count);
+    const pos = order.indexOf(target);
+    const insertAt = pos === -1 ? order.length : pos;
+    order.splice(insertAt, 0, ...moving);
+    const newOf: Record<number, number> = {};
+    order.forEach((oldR, newR) => (newOf[oldR] = newR));
+
+    const next = cloneSheet();
+    const cells: Record<string, SheetCell> = {};
+    for (const [ref, cell] of Object.entries(next.cells)) {
+      const { c, r } = parseRef(ref);
+      cells[cellRef(c, newOf[r] ?? r)] = cell;
+    }
+    next.cells = cells;
+    next.rowHeights = remapIndexMap(next.rowHeights, newOf);
+    commit(next);
+    setSel({ c1: 0, c2: cols - 1, r1: insertAt, r2: insertAt + count - 1 });
+  };
+
   const resizeSelection = (px: number) => {
     const scope = selScope();
     if (!sel || (scope !== "columns" && scope !== "rows")) {
@@ -685,6 +772,10 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   for (let c = 0; c < cols; c++) {
     totalWidth += widthOf(c);
   }
+
+  // Fresh formula engine each render over the current cells (memoised + cycle
+  // safe internally). A cell whose text starts with "=" shows its result.
+  const engine = makeFormulaEngine((c, r) => sheet.cells[cellRef(c, r)]?.v ?? "");
 
   const onGridKeyDown = (e: React.KeyboardEvent) => {
     if (!editUnlocked || editing || !sel) {
@@ -844,11 +935,14 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                 key={c}
                 className={`sheet-colhead${sel && sel.c1 <= c && c <= sel.c2 ? " sel" : ""}${
                   c < freezeCols ? " frozen" : ""
-                }${c === freezeCols - 1 ? " freeze-edge" : ""}`}
+                }${c === freezeCols - 1 ? " freeze-edge" : ""}${
+                  headerDropTarget?.kind === "col" && headerDropTarget.i === c ? " drop-target" : ""
+                }`}
                 style={{
                   width: widthOf(c),
                   ...(c < freezeCols ? { position: "sticky", left: frozenLeft(c), zIndex: 11 } : null),
                 }}
+                draggable={editUnlocked}
                 onClick={(e) => {
                   if (e.shiftKey && anchor.current) {
                     selectColumns(anchor.current.c, c);
@@ -861,6 +955,35 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                     selectColumns(c, c);
                   }
                   openMenu(e);
+                }}
+                onDragStart={(e) => {
+                  const inSel = !!sel && selScope() === "columns" && sel.c1 <= c && c <= sel.c2;
+                  const a = inSel ? sel!.c1 : c;
+                  const b = inSel ? sel!.c2 : c;
+                  if (!inSel) {
+                    selectColumns(c, c);
+                  }
+                  headerDrag.current = { kind: "col", a, b };
+                  e.dataTransfer.setData("text/plain", "");
+                }}
+                onDragOver={(e) => {
+                  if (headerDrag.current?.kind === "col") {
+                    e.preventDefault();
+                    setHeaderDropTarget({ kind: "col", i: c });
+                  }
+                }}
+                onDragEnd={() => {
+                  headerDrag.current = null;
+                  setHeaderDropTarget(null);
+                }}
+                onDrop={(e) => {
+                  const h = headerDrag.current;
+                  headerDrag.current = null;
+                  setHeaderDropTarget(null);
+                  if (h?.kind === "col") {
+                    e.preventDefault();
+                    moveColumns(h.a, h.b, c);
+                  }
                 }}
               >
                 {colName(c)}
@@ -893,8 +1016,9 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
               <div
                 className={`sheet-rowhead${sel && sel.r1 <= r && r <= sel.r2 ? " sel" : ""}${
                   r < freezeRows ? " frozen" : ""
-                }`}
+                }${headerDropTarget?.kind === "row" && headerDropTarget.i === r ? " drop-target" : ""}`}
                 style={{ width: ROW_HEADER_W, ...(r < freezeRows ? { zIndex: 9 } : null) }}
+                draggable={editUnlocked}
                 onClick={(e) => {
                   if (e.shiftKey && anchor.current) {
                     selectRows(anchor.current.r, r);
@@ -907,6 +1031,35 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                     selectRows(r, r);
                   }
                   openMenu(e);
+                }}
+                onDragStart={(e) => {
+                  const inSel = !!sel && selScope() === "rows" && sel.r1 <= r && r <= sel.r2;
+                  const a = inSel ? sel!.r1 : r;
+                  const b = inSel ? sel!.r2 : r;
+                  if (!inSel) {
+                    selectRows(r, r);
+                  }
+                  headerDrag.current = { kind: "row", a, b };
+                  e.dataTransfer.setData("text/plain", "");
+                }}
+                onDragOver={(e) => {
+                  if (headerDrag.current?.kind === "row") {
+                    e.preventDefault();
+                    setHeaderDropTarget({ kind: "row", i: r });
+                  }
+                }}
+                onDragEnd={() => {
+                  headerDrag.current = null;
+                  setHeaderDropTarget(null);
+                }}
+                onDrop={(e) => {
+                  const h = headerDrag.current;
+                  headerDrag.current = null;
+                  setHeaderDropTarget(null);
+                  if (h?.kind === "row") {
+                    e.preventDefault();
+                    moveRows(h.a, h.b, r);
+                  }
                 }}
               >
                 {r + 1}
@@ -967,7 +1120,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                           if (armTimer.current) {
                             clearTimeout(armTimer.current);
                           }
-                          armTimer.current = setTimeout(() => setArmedCell({ c, r }), 300);
+                          armTimer.current = setTimeout(() => setArmedCell({ c, r }), 50);
                         }
                         return;
                       }
@@ -986,7 +1139,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         if (armTimer.current) {
                           clearTimeout(armTimer.current);
                         }
-                        armTimer.current = setTimeout(() => setArmedCell({ c, r }), 300);
+                        armTimer.current = setTimeout(() => setArmedCell({ c, r }), 50);
                       }
                     }}
                     onMouseEnter={() => {
@@ -1113,10 +1266,17 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         }}
                       />
                     ) : (
-                      <span className="sheet-value">
-                        {displayValue(cell?.v, type)}
-                        {type === "list" && <span className="sheet-list-caret">▾</span>}
-                      </span>
+                      (() => {
+                        const raw = cell?.v ?? "";
+                        const shown = raw.startsWith("=") ? engine.get(c, r) : cell?.v;
+                        const isErr = raw.startsWith("=") && typeof shown === "string" && shown.startsWith("#");
+                        return (
+                          <span className={`sheet-value${isErr ? " err" : ""}`}>
+                            {displayValue(shown, type)}
+                            {type === "list" && <span className="sheet-list-caret">▾</span>}
+                          </span>
+                        );
+                      })()
                     )}
                   </div>
                 );
@@ -1381,6 +1541,15 @@ function ColorMenuItem({
                 onClick={() => onPick(t.name)}
               />
             ))}
+            {SITE_SWATCHES.map((s) => (
+              <button
+                key={s.hex}
+                className="sheet-swatch"
+                title={`${s.label} (${s.hex})`}
+                style={{ background: s.hex }}
+                onClick={() => onPick(s.hex)}
+              />
+            ))}
             {presets.map((hex) => (
               <button
                 key={hex}
@@ -1639,6 +1808,16 @@ function parseRef(ref: string): { c: number; r: number } {
     c = c * 26 + (ch.charCodeAt(0) - 64);
   }
   return { c: c - 1, r: parseInt(m[2], 10) - 1 };
+}
+
+/** Rebuilds an index-keyed map (widths/types/…) under an old→new index remap. */
+function remapIndexMap<T>(map: Record<number, T> | undefined, newOf: Record<number, number>): Record<number, T> {
+  const out: Record<number, T> = {};
+  for (const [k, val] of Object.entries(map ?? {})) {
+    const i = Number(k);
+    out[newOf[i] ?? i] = val;
+  }
+  return out;
 }
 
 /** Shifts colWidths/colTypes/colLists (or row heights) down after a delete. */
