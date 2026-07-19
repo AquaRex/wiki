@@ -171,6 +171,8 @@ export interface SheetCell {
   italic?: boolean;
   /** Font size in px; absent = the default cell size. Lets a cell act as a header. */
   size?: number;
+  /** Horizontal text alignment; absent = left. */
+  align?: "left" | "center" | "right";
 }
 
 /** The whole spreadsheet, stored as jsonb in the sheets table. */

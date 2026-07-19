@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  ArrowDown01,
   ArrowDownAZ,
+  ArrowUp01,
   ArrowUpAZ,
   Bold,
   ClipboardPaste,
@@ -212,6 +217,13 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   const pendingCollapse = useRef<{ c: number; r: number } | null>(null);
   // Dragging a column letter / row number to reorder: the dragged index range.
   const headerDrag = useRef<{ kind: "col" | "row"; a: number; b: number } | null>(null);
+  // Formula "point mode": while editing a formula that expects a value, clicking
+  // or dragging cells inserts their reference into the formula (Excel-style).
+  const editInputRef = useRef<HTMLInputElement | null>(null);
+  const pointStart = useRef<number | null>(null); // caret index where the inserted ref begins
+  const pointLen = useRef(0); // length of the currently inserted ref text
+  const pointDragging = useRef(false);
+  const pointAnchor = useRef<{ c: number; r: number } | null>(null);
   const [headerDropTarget, setHeaderDropTarget] = useState<{ kind: "col" | "row"; i: number } | null>(null);
   // The last internal copy, kept so an internal paste restores colours/types the
   // plain-text OS clipboard can't carry. `tsv` is what we wrote to the OS
@@ -391,7 +403,8 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
       !merged.type &&
       !merged.bold &&
       !merged.italic &&
-      !merged.size;
+      !merged.size &&
+      !merged.align;
     if (empty) {
       const { [ref]: _drop, ...rest } = draft.cells;
       draft.cells = rest;
@@ -439,12 +452,15 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     const size = Math.max(9, Math.min(48, current + delta));
     applyToSelection({ size: size === SHEET_DEFAULT_FONT_SIZE ? undefined : size });
   };
+  const setAlign = (align: "left" | "center" | "right") =>
+    applyToSelection({ align: align === "left" ? undefined : align });
 
   /* ---- selection handlers ---- */
 
   const beginEdit = (c: number, r: number, initial?: string) => {
     editValue.current = initial ?? sheet.cells[cellRef(c, r)]?.v ?? "";
     setEditText(editValue.current);
+    pointStart.current = null;
     setEditing({ c, r });
   };
 
@@ -452,7 +468,54 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     if (editing) {
       setCellValue(editing.c, editing.r, editValue.current);
     }
+    pointStart.current = null;
+    pointDragging.current = false;
     setEditing(null);
+  };
+
+  /* ---- formula point mode: click/drag cells into a formula ---- */
+
+  /** True when the edited cell is a formula whose caret expects a cell reference
+   *  (just after =, (, comma, an operator, or mid-insertion of a ref). */
+  const inPointMode = (): boolean => {
+    const input = editInputRef.current;
+    if (!input || !editText.startsWith("=")) {
+      return false;
+    }
+    if (pointStart.current !== null) {
+      return true;
+    }
+    const before = input.value.slice(0, input.selectionStart ?? input.value.length).replace(/\s+$/, "");
+    if (before === "") {
+      return false;
+    }
+    return "=(,+-*/^&<>:".includes(before[before.length - 1]);
+  };
+
+  /** Inserts (or, mid-drag, replaces) a reference at the formula caret. */
+  const insertRefAtPoint = (refText: string) => {
+    const input = editInputRef.current;
+    if (!input) {
+      return;
+    }
+    const text = input.value;
+    let start: number;
+    let end: number;
+    if (pointStart.current !== null) {
+      start = pointStart.current;
+      end = start + pointLen.current;
+    } else {
+      start = input.selectionStart ?? text.length;
+      end = input.selectionEnd ?? start;
+      pointStart.current = start;
+    }
+    const next = text.slice(0, start) + refText + text.slice(end);
+    pointLen.current = refText.length;
+    input.value = next;
+    editValue.current = next;
+    setEditText(next);
+    const caret = start + refText.length;
+    input.setSelectionRange(caret, caret);
   };
 
   const selectCell = (c: number, r: number, extend: boolean) => {
@@ -763,54 +826,62 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     commit(next);
   };
 
-  const compareValues = (va: string, vb: string, dir: "asc" | "desc") => {
-    const na = parseFloat(va);
-    const nb = parseFloat(vb);
-    let cmp: number;
-    if (!isNaN(na) && !isNaN(nb) && va.trim() !== "" && vb.trim() !== "") {
-      cmp = na - nb;
-    } else {
-      cmp = va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" });
+  /** Orders a line of non-empty cells. Alpha = pure text order; numeric = by
+   *  number with any non-numeric cells kept together after the numbers. */
+  const orderCells = (cells: SheetCell[], mode: "alpha" | "num", dir: "asc" | "desc"): SheetCell[] => {
+    const sign = dir === "asc" ? 1 : -1;
+    if (mode === "alpha") {
+      return [...cells].sort((a, b) => sign * (a.v ?? "").localeCompare(b.v ?? "", undefined, { sensitivity: "base" }));
     }
-    return dir === "asc" ? cmp : -cmp;
+    // Numeric: split numbers from text so the two kinds never interleave.
+    const numeric: SheetCell[] = [];
+    const text: SheetCell[] = [];
+    for (const cell of cells) {
+      const n = Number((cell.v ?? "").trim());
+      if ((cell.v ?? "").trim() !== "" && !isNaN(n)) {
+        numeric.push(cell);
+      } else {
+        text.push(cell);
+      }
+    }
+    numeric.sort((a, b) => sign * (Number(a.v) - Number(b.v)));
+    return [...numeric, ...text];
   };
 
-  /** Sorts each selected column's own cells (values + formatting move together),
-   *  independently of the other columns. Empty cells sink to the bottom. */
-  const sortColumns = (c1: number, c2: number, dir: "asc" | "desc") => {
+  /** Sorts each column in c1..c2 over rows rowStart..rowEnd (so a header row can
+   *  be excluded), independently per column. Empty cells sink to the bottom. */
+  const sortColumns = (c1: number, c2: number, rowStart: number, rowEnd: number, mode: "alpha" | "num", dir: "asc" | "desc") => {
     const next = cloneSheet();
     for (let c = c1; c <= c2; c++) {
       const filled: SheetCell[] = [];
-      for (let r = 0; r < rows; r++) {
+      for (let r = rowStart; r <= rowEnd; r++) {
         const cell = sheet.cells[cellRef(c, r)];
         if (cell && (cell.v ?? "").trim() !== "") {
           filled.push(cell);
         }
         delete next.cells[cellRef(c, r)];
       }
-      filled.sort((a, b) => compareValues(a.v ?? "", b.v ?? "", dir));
-      filled.forEach((cell, i) => {
-        next.cells[cellRef(c, i)] = cell;
+      orderCells(filled, mode, dir).forEach((cell, i) => {
+        next.cells[cellRef(c, rowStart + i)] = cell;
       });
     }
     commit(next);
   };
 
-  /** Sorts each selected row's own cells, empties pushed to the right. */
-  const sortRows = (r1: number, r2: number, dir: "asc" | "desc") => {
+  /** Sorts each row in r1..r2 over columns colStart..colEnd, empties to the right. */
+  const sortRows = (r1: number, r2: number, colStart: number, colEnd: number, mode: "alpha" | "num", dir: "asc" | "desc") => {
     const next = cloneSheet();
     for (let r = r1; r <= r2; r++) {
       const filled: SheetCell[] = [];
-      for (let c = 0; c < cols; c++) {
+      for (let c = colStart; c <= colEnd; c++) {
         const cell = sheet.cells[cellRef(c, r)];
         if (cell && (cell.v ?? "").trim() !== "") {
           filled.push(cell);
         }
         delete next.cells[cellRef(c, r)];
       }
-      filled.sort((a, b) => compareValues(a.v ?? "", b.v ?? "", dir));
-      filled.forEach((cell, i) => {
-        next.cells[cellRef(i, r)] = cell;
+      orderCells(filled, mode, dir).forEach((cell, i) => {
+        next.cells[cellRef(colStart + i, r)] = cell;
       });
     }
     commit(next);
@@ -978,6 +1049,31 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
           <button className="sheet-fmt-btn" title="Larger text" disabled={!sel} onClick={() => bumpSize(2)}>
             <span className="sheet-fmt-az large">A</span>
           </button>
+          <span className="sheet-fmt-sep" />
+          <button
+            className={`sheet-fmt-btn${(active?.align ?? "left") === "left" ? " on" : ""}`}
+            title="Align left"
+            disabled={!sel}
+            onClick={() => setAlign("left")}
+          >
+            <AlignLeft />
+          </button>
+          <button
+            className={`sheet-fmt-btn${active?.align === "center" ? " on" : ""}`}
+            title="Align center"
+            disabled={!sel}
+            onClick={() => setAlign("center")}
+          >
+            <AlignCenter />
+          </button>
+          <button
+            className={`sheet-fmt-btn${active?.align === "right" ? " on" : ""}`}
+            title="Align right"
+            disabled={!sel}
+            onClick={() => setAlign("right")}
+          >
+            <AlignRight />
+          </button>
 
           {/* Right-aligned readout: aggregate (multi-select) + active cell value. */}
           <span className="sheet-fmt-grow" />
@@ -1048,6 +1144,11 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
         onMouseUp={() => {
           dragging.current = false;
           disarm();
+          if (pointDragging.current) {
+            pointDragging.current = false;
+            // Keep the formula editor focused so typing continues the formula.
+            editInputRef.current?.focus({ preventScroll: true });
+          }
         }}
         onMouseLeave={() => {
           dragging.current = false;
@@ -1235,6 +1336,17 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       if (e.button !== 0) {
                         return;
                       }
+                      // Formula point mode: insert this cell's reference into the
+                      // formula instead of selecting. preventDefault keeps the
+                      // editor focused (no blur/commit). Skip the cell being edited
+                      // so clicking into its own input just moves the caret.
+                      if (editing && !(editing.c === c && editing.r === r) && inPointMode()) {
+                        e.preventDefault();
+                        pointDragging.current = true;
+                        pointAnchor.current = { c, r };
+                        insertRefAtPoint(cellRef(c, r));
+                        return;
+                      }
                       scrollRef.current?.focus({ preventScroll: true });
                       const multiSel = !!sel && (sel.c1 !== sel.c2 || sel.r1 !== sel.r2);
                       // Pressing inside an existing multi-selection keeps it (so a
@@ -1271,6 +1383,16 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       }
                     }}
                     onMouseEnter={() => {
+                      if (pointDragging.current && pointAnchor.current) {
+                        // Extend the formula reference to cover the dragged range.
+                        const a = pointAnchor.current;
+                        const refText =
+                          a.c === c && a.r === r
+                            ? cellRef(c, r)
+                            : `${cellRef(Math.min(a.c, c), Math.min(a.r, r))}:${cellRef(Math.max(a.c, c), Math.max(a.r, r))}`;
+                        insertRefAtPoint(refText);
+                        return;
+                      }
                       if (dragging.current && anchor.current) {
                         // Moving to extend the selection means this isn't a drag —
                         // cancel the pending arm so it stays a selection gesture.
@@ -1394,11 +1516,15 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         )}
                         <input
                           autoFocus
+                          ref={editInputRef}
                           className={`sheet-input${activeFormula ? " transparent-text" : ""}`}
+                          style={{ textAlign: cell?.align }}
                           defaultValue={editValue.current}
                           onChange={(e) => {
                             editValue.current = e.target.value;
                             setEditText(e.target.value);
+                            // Typing ends any in-progress point-mode ref insertion.
+                            pointStart.current = null;
                           }}
                           onScroll={(e) => {
                             const hl = e.currentTarget.parentElement?.querySelector(".sheet-formula-hl") as HTMLElement | null;
@@ -1433,8 +1559,10 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         const raw = cell?.v ?? "";
                         const shown = raw.startsWith("=") ? engine.get(c, r) : cell?.v;
                         const isErr = raw.startsWith("=") && typeof shown === "string" && shown.startsWith("#");
+                        const justify =
+                          cell?.align === "center" ? "center" : cell?.align === "right" ? "flex-end" : undefined;
                         return (
-                          <span className={`sheet-value${isErr ? " err" : ""}`}>
+                          <span className={`sheet-value${isErr ? " err" : ""}`} style={{ justifyContent: justify }}>
                             {displayValue(shown, type)}
                             {type === "list" && <span className="sheet-list-caret">▾</span>}
                           </span>
@@ -1505,14 +1633,18 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
           onFreezeRows={() => commit({ ...cloneSheet(), freezeRows: sel ? sel.r2 + 1 : 0 })}
           onUnfreeze={() => commit({ ...cloneSheet(), freezeCols: 0, freezeRows: 0 })}
           onResize={resizeSelection}
-          onSort={(dir) => {
+          onSort={(mode, dir) => {
             if (!sel) {
               return;
             }
             if (menu.scope === "rows") {
-              sortRows(sel.r1, sel.r2, dir);
+              // A whole-row selection keeps its first cell (column A) as a header.
+              const colStart = sel.c1 === 0 && sel.c2 === cols - 1 ? 1 : sel.c1;
+              sortRows(sel.r1, sel.r2, colStart, sel.c2, mode, dir);
             } else {
-              sortColumns(sel.c1, sel.c2, dir);
+              // A whole-column selection keeps row 1 (the header) in place.
+              const rowStart = sel.r1 === 0 && sel.r2 === rows - 1 ? 1 : sel.r1;
+              sortColumns(sel.c1, sel.c2, rowStart, sel.r2, mode, dir);
             }
           }}
           onInsertColAfter={() => addColumns(1)}
@@ -1579,7 +1711,7 @@ function SheetMenu({
   onFreezeRows: () => void;
   onUnfreeze: () => void;
   onResize: (px: number) => void;
-  onSort: (dir: "asc" | "desc") => void;
+  onSort: (mode: "alpha" | "num", dir: "asc" | "desc") => void;
   onInsertColAfter: () => void;
   onInsertRowAfter: () => void;
   onDeleteColumns: () => void;
@@ -1668,11 +1800,17 @@ function SheetMenu({
               </div>
             )}
           </div>
-          <button className="sheet-menu-item" onClick={() => (onSort("asc"), onClose())}>
-            <ArrowDownAZ className="sheet-menu-icon" /> Sort A→Z / low→high
+          <button className="sheet-menu-item" onClick={() => (onSort("alpha", "asc"), onClose())}>
+            <ArrowDownAZ className="sheet-menu-icon" /> Sort A → Z
           </button>
-          <button className="sheet-menu-item" onClick={() => (onSort("desc"), onClose())}>
-            <ArrowUpAZ className="sheet-menu-icon" /> Sort Z→A / high→low
+          <button className="sheet-menu-item" onClick={() => (onSort("alpha", "desc"), onClose())}>
+            <ArrowUpAZ className="sheet-menu-icon" /> Sort Z → A
+          </button>
+          <button className="sheet-menu-item" onClick={() => (onSort("num", "asc"), onClose())}>
+            <ArrowDown01 className="sheet-menu-icon" /> Sort 0 → 9
+          </button>
+          <button className="sheet-menu-item" onClick={() => (onSort("num", "desc"), onClose())}>
+            <ArrowUp01 className="sheet-menu-icon" /> Sort 9 → 0
           </button>
           <div className="sheet-menu-sep" />
           {isCols ? (
