@@ -64,9 +64,9 @@ const TONE_SWATCHES: { name: string; label: string; css: string }[] = [
   { name: "white", label: "White", css: "#ffffff" },
 ];
 
-/** The site's own palette (dark theme), so header/cell colours match the wiki.
- *  Stored verbatim as #hex. Backgrounds first, then accents and text tones. */
-const SITE_SWATCHES: { hex: string; label: string }[] = [
+/** The site's dark background shades — grouped apart so picking a header/cell
+ *  background isn't lost among the accent colours. Stored verbatim as #hex. */
+const BG_SWATCHES: { hex: string; label: string }[] = [
   { hex: "#0f1319", label: "Page bg" },
   { hex: "#10141a", label: "Deep" },
   { hex: "#12171e", label: "Code bg" },
@@ -75,17 +75,25 @@ const SITE_SWATCHES: { hex: string; label: string }[] = [
   { hex: "#29313d", label: "Border" },
   { hex: "#38414f", label: "Border strong" },
   { hex: "#2a2113", label: "Accent soft" },
+];
+
+/** The site's accent / text colours. */
+const COLOR_SWATCHES: { hex: string; label: string }[] = [
+  { hex: "#e5a64b", label: "Accent" },
   { hex: "#b9822f", label: "Accent line" },
   { hex: "#bb8a43", label: "Gold" },
   { hex: "#da781c", label: "Orange" },
-  { hex: "#e5a64b", label: "Accent" },
   { hex: "#57b382", label: "Green" },
   { hex: "#e07070", label: "Red" },
   { hex: "#d99b3f", label: "Amber" },
   { hex: "#6aa9dd", label: "Blue" },
   { hex: "#e7eaf0", label: "Text" },
   { hex: "#9aa3b2", label: "Text dim" },
+  { hex: "#6c7686", label: "Text faint" },
 ];
+
+/** Distinct colours cycled through a formula's cell references (Excel-style). */
+const REF_COLORS = ["#e5a64b", "#6aa9dd", "#57b382", "#e07070", "#c084fc", "#d99b3f", "#4dd0e1", "#f06292"];
 
 const PRESETS_KEY = "wiki-sheet-color-presets";
 
@@ -215,6 +223,11 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Options being edited in the list-type dialog, or null when it's closed.
   const [listDialog, setListDialog] = useState<{ c1: number; c2: number; options: string[] } | null>(null);
+  // Live text of the cell being edited — drives formula reference highlighting.
+  const [editText, setEditText] = useState("");
+  // Which aggregate the format-bar readout shows for a multi-cell selection.
+  const [aggFn, setAggFn] = useState<"SUM" | "AVERAGE" | "COUNT" | "MIN" | "MAX">("SUM");
+  const [aggOpen, setAggOpen] = useState(false);
 
   const disarm = () => {
     if (armTimer.current) {
@@ -309,6 +322,20 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
       window.removeEventListener("keydown", onKey);
     };
   }, [menu]);
+
+  // Close the aggregate dropdown on any outside click.
+  useEffect(() => {
+    if (!aggOpen) {
+      return;
+    }
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest(".sheet-agg")) {
+        setAggOpen(false);
+      }
+    };
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [aggOpen]);
 
   if (status === "loading") {
     return <div className="sheet-empty">Loading sheet…</div>;
@@ -417,6 +444,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
 
   const beginEdit = (c: number, r: number, initial?: string) => {
     editValue.current = initial ?? sheet.cells[cellRef(c, r)]?.v ?? "";
+    setEditText(editValue.current);
     setEditing({ c, r });
   };
 
@@ -735,34 +763,56 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     commit(next);
   };
 
-  const sortColumn = (c: number, dir: "asc" | "desc") => {
-    // Reorder whole rows by column c's value. Rows keep their cells together.
+  const compareValues = (va: string, vb: string, dir: "asc" | "desc") => {
+    const na = parseFloat(va);
+    const nb = parseFloat(vb);
+    let cmp: number;
+    if (!isNaN(na) && !isNaN(nb) && va.trim() !== "" && vb.trim() !== "") {
+      cmp = na - nb;
+    } else {
+      cmp = va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" });
+    }
+    return dir === "asc" ? cmp : -cmp;
+  };
+
+  /** Sorts each selected column's own cells (values + formatting move together),
+   *  independently of the other columns. Empty cells sink to the bottom. */
+  const sortColumns = (c1: number, c2: number, dir: "asc" | "desc") => {
     const next = cloneSheet();
-    const order = Array.from({ length: rows }, (_, r) => r);
-    const valAt = (r: number) => sheet.cells[cellRef(c, r)]?.v ?? "";
-    order.sort((a, b) => {
-      const va = valAt(a);
-      const vb = valAt(b);
-      const na = parseFloat(va);
-      const nb = parseFloat(vb);
-      let cmp: number;
-      if (!isNaN(na) && !isNaN(nb) && va.trim() !== "" && vb.trim() !== "") {
-        cmp = na - nb;
-      } else {
-        cmp = va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" });
-      }
-      return dir === "asc" ? cmp : -cmp;
-    });
-    const remapped: Record<string, SheetCell> = {};
-    order.forEach((oldR, newR) => {
-      for (let col = 0; col < cols; col++) {
-        const cell = sheet.cells[cellRef(col, oldR)];
-        if (cell) {
-          remapped[cellRef(col, newR)] = cell;
+    for (let c = c1; c <= c2; c++) {
+      const filled: SheetCell[] = [];
+      for (let r = 0; r < rows; r++) {
+        const cell = sheet.cells[cellRef(c, r)];
+        if (cell && (cell.v ?? "").trim() !== "") {
+          filled.push(cell);
         }
+        delete next.cells[cellRef(c, r)];
       }
-    });
-    next.cells = remapped;
+      filled.sort((a, b) => compareValues(a.v ?? "", b.v ?? "", dir));
+      filled.forEach((cell, i) => {
+        next.cells[cellRef(c, i)] = cell;
+      });
+    }
+    commit(next);
+  };
+
+  /** Sorts each selected row's own cells, empties pushed to the right. */
+  const sortRows = (r1: number, r2: number, dir: "asc" | "desc") => {
+    const next = cloneSheet();
+    for (let r = r1; r <= r2; r++) {
+      const filled: SheetCell[] = [];
+      for (let c = 0; c < cols; c++) {
+        const cell = sheet.cells[cellRef(c, r)];
+        if (cell && (cell.v ?? "").trim() !== "") {
+          filled.push(cell);
+        }
+        delete next.cells[cellRef(c, r)];
+      }
+      filled.sort((a, b) => compareValues(a.v ?? "", b.v ?? "", dir));
+      filled.forEach((cell, i) => {
+        next.cells[cellRef(i, r)] = cell;
+      });
+    }
     commit(next);
   };
 
@@ -776,6 +826,45 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   // Fresh formula engine each render over the current cells (memoised + cycle
   // safe internally). A cell whose text starts with "=" shows its result.
   const engine = makeFormulaEngine((c, r) => sheet.cells[cellRef(c, r)]?.v ?? "");
+
+  // While editing a formula, parse its cell references so we can outline them in
+  // the grid (dotted, one colour each) and colour the matching text.
+  const activeFormula = editing && editText.startsWith("=") ? analyzeFormula(editText) : null;
+
+  const pxLeft = (c: number) => frozenLeft(c);
+  const pxTop = (r: number) => frozenTop(r);
+
+  // Format-bar readout: the active cell's raw value (formula visible) plus, for a
+  // multi-cell selection, a chosen aggregate of the numeric values in it.
+  const isMultiSel = !!sel && (sel.c1 !== sel.c2 || sel.r1 !== sel.r2);
+  const activeRaw = sel ? sheet.cells[cellRef(sel.c1, sel.r1)]?.v ?? "" : "";
+  const activeRawSegments = activeRaw.startsWith("=") ? analyzeFormula(activeRaw).segments : null;
+  const aggregateReadout = (): string => {
+    if (!sel) {
+      return "";
+    }
+    const nums: number[] = [];
+    for (let c = sel.c1; c <= sel.c2; c++) {
+      for (let r = sel.r1; r <= sel.r2; r++) {
+        const raw = sheet.cells[cellRef(c, r)]?.v ?? "";
+        const s = raw.startsWith("=") ? engine.get(c, r) : raw;
+        const n = Number(s);
+        if (s.trim() !== "" && !isNaN(n)) {
+          nums.push(n);
+        }
+      }
+    }
+    if (aggFn === "COUNT") {
+      return String(nums.length);
+    }
+    if (!nums.length) {
+      return "—";
+    }
+    const sum = nums.reduce((p, x) => p + x, 0);
+    const val =
+      aggFn === "SUM" ? sum : aggFn === "AVERAGE" ? sum / nums.length : aggFn === "MIN" ? Math.min(...nums) : Math.max(...nums);
+    return String(Math.round(val * 1e6) / 1e6);
+  };
 
   const onGridKeyDown = (e: React.KeyboardEvent) => {
     if (!editUnlocked || editing || !sel) {
@@ -889,6 +978,45 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
           <button className="sheet-fmt-btn" title="Larger text" disabled={!sel} onClick={() => bumpSize(2)}>
             <span className="sheet-fmt-az large">A</span>
           </button>
+
+          {/* Right-aligned readout: aggregate (multi-select) + active cell value. */}
+          <span className="sheet-fmt-grow" />
+          {isMultiSel && (
+            <span className="sheet-agg">
+              <button className="sheet-agg-btn" onClick={() => setAggOpen((o) => !o)} title="Choose aggregate">
+                {aggFn.charAt(0) + aggFn.slice(1).toLowerCase()}: <b>{aggregateReadout()}</b> ▾
+              </button>
+              {aggOpen && (
+                <span className="sheet-agg-pop">
+                  {(["SUM", "AVERAGE", "COUNT", "MIN", "MAX"] as const).map((fn) => (
+                    <button
+                      key={fn}
+                      className={`sheet-menu-item${fn === aggFn ? " on" : ""}`}
+                      onClick={() => {
+                        setAggFn(fn);
+                        setAggOpen(false);
+                      }}
+                    >
+                      {fn.charAt(0) + fn.slice(1).toLowerCase()}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </span>
+          )}
+          <span className="sheet-bar-value" title={activeRaw || undefined}>
+            {activeRawSegments ? (
+              activeRawSegments.map((seg, i) => (
+                <span key={i} style={seg.color ? { color: seg.color } : undefined}>
+                  {seg.text}
+                </span>
+              ))
+            ) : activeRaw ? (
+              activeRaw
+            ) : (
+              <span className="sheet-bar-empty">—</span>
+            )}
+          </span>
         </div>
       )}
       <div
@@ -1120,7 +1248,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                           if (armTimer.current) {
                             clearTimeout(armTimer.current);
                           }
-                          armTimer.current = setTimeout(() => setArmedCell({ c, r }), 50);
+                          armTimer.current = setTimeout(() => setArmedCell({ c, r }), 100);
                         }
                         return;
                       }
@@ -1139,7 +1267,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         if (armTimer.current) {
                           clearTimeout(armTimer.current);
                         }
-                        armTimer.current = setTimeout(() => setArmedCell({ c, r }), 50);
+                        armTimer.current = setTimeout(() => setArmedCell({ c, r }), 100);
                       }
                     }}
                     onMouseEnter={() => {
@@ -1192,6 +1320,21 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       pressInside.current = false;
                       pendingCollapse.current = null;
                       e.dataTransfer.setData("text/plain", isBlock ? "" : cell?.v ?? "");
+                      if (isBlock && sel) {
+                        // Show the whole selection being dragged, not a single cell.
+                        const ghost = buildDragGhost(
+                          sel,
+                          (cc, rr) => {
+                            const rw = sheet.cells[cellRef(cc, rr)]?.v ?? "";
+                            return rw.startsWith("=") ? engine.get(cc, rr) : rw;
+                          },
+                          widthOf,
+                          heightOf
+                        );
+                        document.body.appendChild(ghost);
+                        e.dataTransfer.setDragImage(ghost, 12, 10);
+                        setTimeout(() => ghost.remove(), 0);
+                      }
                     }}
                     onDragEnd={disarm}
                     onDragOver={(e) => {
@@ -1239,32 +1382,52 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         onClose={() => setEditing(null)}
                       />
                     ) : isEditing ? (
-                      <input
-                        autoFocus
-                        className="sheet-input"
-                        defaultValue={editValue.current}
-                        onChange={(e) => (editValue.current = e.target.value)}
-                        onBlur={commitEdit}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            commitEdit();
-                            selectCell(c, Math.min(r + 1, rows - 1), false);
-                            // Return focus to the grid so the newly-selected cell
-                            // is immediately typeable (start typing to edit it).
-                            scrollRef.current?.focus({ preventScroll: true });
-                          } else if (e.key === "Escape") {
-                            e.preventDefault();
-                            setEditing(null);
-                            scrollRef.current?.focus({ preventScroll: true });
-                          } else if (e.key === "Tab") {
-                            e.preventDefault();
-                            commitEdit();
-                            selectCell(Math.min(c + 1, cols - 1), r, false);
-                            scrollRef.current?.focus({ preventScroll: true });
-                          }
-                        }}
-                      />
+                      <div className="sheet-edit-wrap">
+                        {activeFormula && (
+                          <div className="sheet-formula-hl" aria-hidden>
+                            {activeFormula.segments.map((seg, i) => (
+                              <span key={i} style={seg.color ? { color: seg.color } : undefined}>
+                                {seg.text}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <input
+                          autoFocus
+                          className={`sheet-input${activeFormula ? " transparent-text" : ""}`}
+                          defaultValue={editValue.current}
+                          onChange={(e) => {
+                            editValue.current = e.target.value;
+                            setEditText(e.target.value);
+                          }}
+                          onScroll={(e) => {
+                            const hl = e.currentTarget.parentElement?.querySelector(".sheet-formula-hl") as HTMLElement | null;
+                            if (hl) {
+                              hl.scrollLeft = e.currentTarget.scrollLeft;
+                            }
+                          }}
+                          onBlur={commitEdit}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              commitEdit();
+                              selectCell(c, Math.min(r + 1, rows - 1), false);
+                              // Return focus to the grid so the newly-selected cell
+                              // is immediately typeable (start typing to edit it).
+                              scrollRef.current?.focus({ preventScroll: true });
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              setEditing(null);
+                              scrollRef.current?.focus({ preventScroll: true });
+                            } else if (e.key === "Tab") {
+                              e.preventDefault();
+                              commitEdit();
+                              selectCell(Math.min(c + 1, cols - 1), r, false);
+                              scrollRef.current?.focus({ preventScroll: true });
+                            }
+                          }}
+                        />
+                      </div>
                     ) : (
                       (() => {
                         const raw = cell?.v ?? "";
@@ -1283,6 +1446,27 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
               })}
             </div>
           ))}
+
+          {/* Dotted outlines over the cells a formula-in-progress references. */}
+          {activeFormula?.refs.map((ref, i) => {
+            const c1 = Math.max(0, Math.min(ref.c1, cols - 1));
+            const c2 = Math.max(0, Math.min(ref.c2, cols - 1));
+            const r1 = Math.max(0, Math.min(ref.r1, rows - 1));
+            const r2 = Math.max(0, Math.min(ref.r2, rows - 1));
+            return (
+              <div
+                key={i}
+                className="sheet-ref-box"
+                style={{
+                  left: pxLeft(c1),
+                  top: pxTop(r1),
+                  width: pxLeft(c2 + 1) - pxLeft(c1),
+                  height: pxTop(r2 + 1) - pxTop(r1),
+                  borderColor: ref.color,
+                }}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -1321,7 +1505,16 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
           onFreezeRows={() => commit({ ...cloneSheet(), freezeRows: sel ? sel.r2 + 1 : 0 })}
           onUnfreeze={() => commit({ ...cloneSheet(), freezeCols: 0, freezeRows: 0 })}
           onResize={resizeSelection}
-          onSort={(dir) => sel && sortColumn(sel.c1, dir)}
+          onSort={(dir) => {
+            if (!sel) {
+              return;
+            }
+            if (menu.scope === "rows") {
+              sortRows(sel.r1, sel.r2, dir);
+            } else {
+              sortColumns(sel.c1, sel.c2, dir);
+            }
+          }}
           onInsertColAfter={() => addColumns(1)}
           onInsertRowAfter={() => addRows(1)}
           onDeleteColumns={() => sel && deleteColumns(sel.c1, sel.c2)}
@@ -1475,16 +1668,12 @@ function SheetMenu({
               </div>
             )}
           </div>
-          {isCols && (
-            <>
-              <button className="sheet-menu-item" onClick={() => (onSort("asc"), onClose())}>
-                <ArrowDownAZ className="sheet-menu-icon" /> Sort A→Z / low→high
-              </button>
-              <button className="sheet-menu-item" onClick={() => (onSort("desc"), onClose())}>
-                <ArrowUpAZ className="sheet-menu-icon" /> Sort Z→A / high→low
-              </button>
-            </>
-          )}
+          <button className="sheet-menu-item" onClick={() => (onSort("asc"), onClose())}>
+            <ArrowDownAZ className="sheet-menu-icon" /> Sort A→Z / low→high
+          </button>
+          <button className="sheet-menu-item" onClick={() => (onSort("desc"), onClose())}>
+            <ArrowUpAZ className="sheet-menu-icon" /> Sort Z→A / high→low
+          </button>
           <div className="sheet-menu-sep" />
           {isCols ? (
             <>
@@ -1531,6 +1720,7 @@ function ColorMenuItem({
       {label} ▸
       {open && (
         <div className="sheet-submenu sheet-color-pop" onClick={(e) => e.stopPropagation()}>
+          <div className="sheet-swatch-group-label">Colours</div>
           <div className="sheet-swatches">
             {TONE_SWATCHES.map((t) => (
               <button
@@ -1541,7 +1731,7 @@ function ColorMenuItem({
                 onClick={() => onPick(t.name)}
               />
             ))}
-            {SITE_SWATCHES.map((s) => (
+            {COLOR_SWATCHES.map((s) => (
               <button
                 key={s.hex}
                 className="sheet-swatch"
@@ -1550,16 +1740,35 @@ function ColorMenuItem({
                 onClick={() => onPick(s.hex)}
               />
             ))}
-            {presets.map((hex) => (
+          </div>
+          <div className="sheet-swatch-group-label">Backgrounds</div>
+          <div className="sheet-swatches">
+            {BG_SWATCHES.map((s) => (
               <button
-                key={hex}
+                key={s.hex}
                 className="sheet-swatch"
-                title={hex}
-                style={{ background: hex }}
-                onClick={() => onPick(hex)}
+                title={`${s.label} (${s.hex})`}
+                style={{ background: s.hex }}
+                onClick={() => onPick(s.hex)}
               />
             ))}
           </div>
+          {presets.length > 0 && (
+            <>
+              <div className="sheet-swatch-group-label">Presets</div>
+              <div className="sheet-swatches">
+                {presets.map((hex) => (
+                  <button
+                    key={hex}
+                    className="sheet-swatch"
+                    title={hex}
+                    style={{ background: hex }}
+                    onClick={() => onPick(hex)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
           <div className="sheet-custom-color">
             <input type="color" value={custom} onChange={(e) => setCustom(e.target.value)} />
             <button
@@ -1808,6 +2017,75 @@ function parseRef(ref: string): { c: number; r: number } {
     c = c * 26 + (ch.charCodeAt(0) - 64);
   }
   return { c: c - 1, r: parseInt(m[2], 10) - 1 };
+}
+
+/** Parses a formula's text into coloured segments (for display) and the cell
+ *  reference rects they map to (for outlining), sharing one colour per ref. */
+function analyzeFormula(text: string): {
+  segments: { text: string; color?: string }[];
+  refs: { c1: number; r1: number; c2: number; r2: number; color: string }[];
+} {
+  const re = /([A-Za-z]+[0-9]+)(?::([A-Za-z]+[0-9]+))?/g;
+  const segments: { text: string; color?: string }[] = [];
+  const refs: { c1: number; r1: number; c2: number; r2: number; color: string }[] = [];
+  const colorOf = new Map<string, string>();
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) {
+      segments.push({ text: text.slice(last, m.index) });
+    }
+    const key = m[0].toUpperCase();
+    let color = colorOf.get(key);
+    if (!color) {
+      color = REF_COLORS[colorOf.size % REF_COLORS.length];
+      colorOf.set(key, color);
+      const a = parseRef(m[1].toUpperCase());
+      const b = m[2] ? parseRef(m[2].toUpperCase()) : a;
+      refs.push({
+        c1: Math.min(a.c, b.c),
+        r1: Math.min(a.r, b.r),
+        c2: Math.max(a.c, b.c),
+        r2: Math.max(a.r, b.r),
+        color,
+      });
+    }
+    segments.push({ text: m[0], color });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    segments.push({ text: text.slice(last) });
+  }
+  return { segments, refs };
+}
+
+/** Builds an off-screen element mirroring a selection block, for the drag image. */
+function buildDragGhost(
+  block: Rect,
+  valueAt: (c: number, r: number) => string,
+  widthOf: (c: number) => number,
+  heightOf: (r: number) => number
+): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.style.cssText =
+    "position:fixed;top:-1000px;left:-1000px;pointer-events:none;font-family:var(--font-mono,monospace);font-size:12px;border:1px solid #e5a64b;box-shadow:0 6px 20px rgba(0,0,0,.4);opacity:.9;";
+  const maxCols = Math.min(block.c2 - block.c1 + 1, 6);
+  const maxRows = Math.min(block.r2 - block.r1 + 1, 8);
+  for (let r = block.r1; r < block.r1 + maxRows; r++) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;";
+    for (let c = block.c1; c < block.c1 + maxCols; c++) {
+      const cell = document.createElement("div");
+      cell.textContent = valueAt(c, r);
+      cell.style.cssText = `width:${Math.min(widthOf(c), 90)}px;height:${Math.min(
+        heightOf(r),
+        26
+      )}px;box-sizing:border-box;padding:2px 6px;border-right:1px solid #29313d;border-bottom:1px solid #29313d;background:#161b23;color:#fff;white-space:nowrap;overflow:hidden;`;
+      row.appendChild(cell);
+    }
+    wrap.appendChild(row);
+  }
+  return wrap;
 }
 
 /** Rebuilds an index-keyed map (widths/types/…) under an old→new index remap. */
