@@ -165,6 +165,12 @@ export interface SheetCell {
   bg?: string;
   /** Per-cell type override. Falls back to the column type, then "normal". */
   type?: SheetCellType;
+  /** Bold text. */
+  bold?: boolean;
+  /** Italic text. */
+  italic?: boolean;
+  /** Font size in px; absent = the default cell size. Lets a cell act as a header. */
+  size?: number;
 }
 
 /** The whole spreadsheet, stored as jsonb in the sheets table. */

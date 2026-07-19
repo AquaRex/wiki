@@ -1,7 +1,28 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowDownAZ, ArrowUpAZ } from "lucide-react";
+import {
+  ArrowDownAZ,
+  ArrowUpAZ,
+  Bold,
+  ClipboardPaste,
+  Copy,
+  Italic,
+  Plus,
+  Redo2,
+  Undo2,
+  X,
+} from "lucide-react";
 import { getStore } from "~/lib/store";
 import { useAuth } from "~/lib/auth";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/components/ui/dialog";
+import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
 import {
   cellRef,
   colName,
@@ -148,6 +169,23 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   const [clipboard, setClipboard] = useState<{ rect: Rect; cells: (SheetCell | undefined)[][] } | null>(null);
   const cellDrag = useRef<{ c: number; r: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Set on mousedown when a list cell was already the sole active cell, so the
+  // ensuing click opens its dropdown instead of merely re-selecting.
+  const clickToEdit = useRef(false);
+  // A cell only becomes HTML5-draggable after a short press-and-hold, so the
+  // default press gesture stays selection. Moving to select disarms it.
+  const [armedCell, setArmedCell] = useState<{ c: number; r: number } | null>(null);
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Options being edited in the list-type dialog, or null when it's closed.
+  const [listDialog, setListDialog] = useState<{ c1: number; c2: number; options: string[] } | null>(null);
+
+  const disarm = () => {
+    if (armTimer.current) {
+      clearTimeout(armTimer.current);
+      armTimer.current = null;
+    }
+    setArmedCell((a) => (a ? null : a));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -170,7 +208,10 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   }, [pagePath, sheetKey]);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const commit = (next: SheetData) => {
+  const undoStack = useRef<SheetData[]>([]);
+  const redoStack = useRef<SheetData[]>([]);
+
+  const scheduleSave = (next: SheetData) => {
     setSheet(next);
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -180,6 +221,37 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
         .saveSheet(pagePath, sheetKey, next)
         .catch((e) => alert(e instanceof Error ? e.message : "Could not save sheet."));
     }, 500);
+  };
+
+  // Every user edit routes through commit, which snapshots the prior state for
+  // undo. Redo is cleared because a fresh edit forks a new history branch.
+  const commit = (next: SheetData) => {
+    if (sheet) {
+      undoStack.current.push(sheet);
+      if (undoStack.current.length > 100) {
+        undoStack.current.shift();
+      }
+    }
+    redoStack.current = [];
+    scheduleSave(next);
+  };
+
+  const undo = () => {
+    const prev = undoStack.current.pop();
+    if (!prev || !sheet) {
+      return;
+    }
+    redoStack.current.push(sheet);
+    scheduleSave(prev);
+  };
+
+  const redo = () => {
+    const nextState = redoStack.current.pop();
+    if (!nextState || !sheet) {
+      return;
+    }
+    undoStack.current.push(sheet);
+    scheduleSave(nextState);
   };
 
   // Close the context menu on any outside click / Escape.
@@ -226,8 +298,17 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     const ref = cellRef(c, r);
     const current = draft.cells[ref] ?? {};
     const merged: SheetCell = { ...current, ...patch };
-    // Drop empty cells from the sparse map entirely.
-    const empty = !merged.v && !merged.color && !merged.bg && !merged.type;
+    // Drop empty cells from the sparse map entirely. A cell counts as populated
+    // if it carries any value, colour, type or formatting (so a pre-formatted
+    // header cell survives even before it holds text).
+    const empty =
+      !merged.v &&
+      !merged.color &&
+      !merged.bg &&
+      !merged.type &&
+      !merged.bold &&
+      !merged.italic &&
+      !merged.size;
     if (empty) {
       const { [ref]: _drop, ...rest } = draft.cells;
       draft.cells = rest;
@@ -262,6 +343,18 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     const next = cloneSheet();
     setCell(next, c, r, { v });
     commit(next);
+  };
+
+  /* ---- formatting (applies to the whole selection) ---- */
+
+  const activeCell = (): SheetCell | undefined => (sel ? sheet.cells[cellRef(sel.c1, sel.r1)] : undefined);
+
+  const toggleBold = () => applyToSelection({ bold: !activeCell()?.bold });
+  const toggleItalic = () => applyToSelection({ italic: !activeCell()?.italic });
+  const bumpSize = (delta: number) => {
+    const current = activeCell()?.size ?? SHEET_DEFAULT_FONT_SIZE;
+    const size = Math.max(9, Math.min(48, current + delta));
+    applyToSelection({ size: size === SHEET_DEFAULT_FONT_SIZE ? undefined : size });
   };
 
   /* ---- selection handlers ---- */
@@ -427,13 +520,18 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     }
     const next = cloneSheet();
     const scope = selScope();
+    // List options are shared per column, so store them for every column the
+    // selection spans regardless of whether whole columns or just cells are
+    // selected — otherwise a cell-scoped list would have an empty dropdown.
+    if (type === "list" && list) {
+      for (let col = sel.c1; col <= sel.c2; col++) {
+        next.colLists = { ...next.colLists, [col]: list };
+      }
+    }
     if (scope === "columns") {
-      // Column type is stored per-column so new cells inherit it.
+      // A whole-column type is stored per-column so new cells inherit it.
       for (let col = sel.c1; col <= sel.c2; col++) {
         next.colTypes = { ...next.colTypes, [col]: type };
-        if (type === "list" && list) {
-          next.colLists = { ...next.colLists, [col]: list };
-        }
       }
     } else {
       for (let col = sel.c1; col <= sel.c2; col++) {
@@ -496,20 +594,43 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
         e.shiftKey
       );
     };
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
-      e.preventDefault();
-      doCopy();
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
-      e.preventDefault();
-      doCut();
-      return;
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
-      e.preventDefault();
-      doPaste();
-      return;
+    if (e.ctrlKey || e.metaKey) {
+      const key = e.key.toLowerCase();
+      if (key === "c") {
+        e.preventDefault();
+        doCopy();
+        return;
+      }
+      if (key === "x") {
+        e.preventDefault();
+        doCut();
+        return;
+      }
+      if (key === "v") {
+        e.preventDefault();
+        doPaste();
+        return;
+      }
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (key === "y" || (key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (key === "b") {
+        e.preventDefault();
+        toggleBold();
+        return;
+      }
+      if (key === "i") {
+        e.preventDefault();
+        toggleItalic();
+        return;
+      }
     }
     switch (e.key) {
       case "ArrowUp":
@@ -529,9 +650,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
         return;
       case "F2":
         e.preventDefault();
-        if (typeOf(active.c, active.r) !== "list") {
-          beginEdit(active.c, active.r);
-        }
+        beginEdit(active.c, active.r);
         return;
     }
     // A printable character starts editing, replacing the cell (Excel behaviour).
@@ -543,8 +662,52 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     }
   };
 
+  const active = activeCell();
+
   return (
     <div className="sheet" onContextMenu={(e) => e.preventDefault()}>
+      {editUnlocked && (
+        <div className="sheet-formatbar">
+          <button className="sheet-fmt-btn" title="Undo (Ctrl+Z)" disabled={undoStack.current.length === 0} onClick={undo}>
+            <Undo2 />
+          </button>
+          <button className="sheet-fmt-btn" title="Redo (Ctrl+Y)" disabled={redoStack.current.length === 0} onClick={redo}>
+            <Redo2 />
+          </button>
+          <span className="sheet-fmt-sep" />
+          <button className="sheet-fmt-btn" title="Copy (Ctrl+C)" disabled={!sel} onClick={doCopy}>
+            <Copy />
+          </button>
+          <button className="sheet-fmt-btn" title="Paste (Ctrl+V)" disabled={!clipboard || !sel} onClick={doPaste}>
+            <ClipboardPaste />
+          </button>
+          <span className="sheet-fmt-sep" />
+          <button
+            className={`sheet-fmt-btn${active?.bold ? " on" : ""}`}
+            title="Bold (Ctrl+B)"
+            disabled={!sel}
+            onClick={toggleBold}
+          >
+            <Bold />
+          </button>
+          <button
+            className={`sheet-fmt-btn${active?.italic ? " on" : ""}`}
+            title="Italic (Ctrl+I)"
+            disabled={!sel}
+            onClick={toggleItalic}
+          >
+            <Italic />
+          </button>
+          <span className="sheet-fmt-sep" />
+          <button className="sheet-fmt-btn" title="Smaller text" disabled={!sel} onClick={() => bumpSize(-2)}>
+            <span className="sheet-fmt-az small">A</span>
+          </button>
+          <span className="sheet-fmt-size">{active?.size ?? SHEET_DEFAULT_FONT_SIZE}</span>
+          <button className="sheet-fmt-btn" title="Larger text" disabled={!sel} onClick={() => bumpSize(2)}>
+            <span className="sheet-fmt-az large">A</span>
+          </button>
+        </div>
+      )}
       <div
         ref={scrollRef}
         className="sheet-scroll"
@@ -552,9 +715,11 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
         onKeyDown={onGridKeyDown}
         onMouseUp={() => {
           dragging.current = false;
+          disarm();
         }}
         onMouseLeave={() => {
           dragging.current = false;
+          disarm();
         }}
       >
         <div className="sheet-grid" style={{ width: totalWidth }}>
@@ -646,28 +811,53 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                     key={c}
                     className={`sheet-cell${selected ? " sel" : ""}${
                       selected && sel && sel.c1 === c && sel.r1 === r ? " active" : ""
-                    }`}
+                    }${isEditing && type === "list" ? " editing-list" : ""}`}
                     style={{
                       width: widthOf(c),
                       color: colorToCss(cell?.color),
                       background: colorToCss(cell?.bg),
+                      fontWeight: cell?.bold ? 700 : undefined,
+                      fontStyle: cell?.italic ? "italic" : undefined,
+                      fontSize: cell?.size ? `${cell.size}px` : undefined,
                     }}
-                    draggable={editUnlocked && !isEditing}
+                    draggable={editUnlocked && !isEditing && armedCell?.c === c && armedCell?.r === r}
                     onMouseDown={(e) => {
                       if (e.button !== 0) {
                         return;
                       }
+                      // A click on an already-active list cell (not a fresh select)
+                      // opens its dropdown — so one click selects, the next edits.
+                      const wasSoleActive =
+                        !!sel && sel.c1 === c && sel.c2 === c && sel.r1 === r && sel.r2 === r;
+                      clickToEdit.current = wasSoleActive && type === "list" && !e.shiftKey;
                       dragging.current = true;
                       selectCell(c, r, e.shiftKey);
                       scrollRef.current?.focus({ preventScroll: true });
+                      // Arm this cell for dragging only after a press-and-hold, so
+                      // a normal press still starts a selection drag.
+                      if (editUnlocked && !e.shiftKey) {
+                        if (armTimer.current) {
+                          clearTimeout(armTimer.current);
+                        }
+                        armTimer.current = setTimeout(() => setArmedCell({ c, r }), 300);
+                      }
                     }}
                     onMouseEnter={() => {
                       if (dragging.current && anchor.current) {
+                        // Moving to extend the selection means this isn't a drag —
+                        // cancel the pending arm so it stays a selection gesture.
+                        clickToEdit.current = false;
+                        disarm();
                         setSel(normRect(anchor.current, { c, r }));
                       }
                     }}
+                    onClick={() => {
+                      if (editUnlocked && type === "list" && clickToEdit.current && !isEditing) {
+                        beginEdit(c, r);
+                      }
+                    }}
                     onDoubleClick={() => {
-                      if (editUnlocked && type !== "list") {
+                      if (editUnlocked) {
                         beginEdit(c, r);
                       }
                     }}
@@ -681,6 +871,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       cellDrag.current = { c, r };
                       e.dataTransfer.setData("text/plain", cell?.v ?? "");
                     }}
+                    onDragEnd={disarm}
                     onDragOver={(e) => {
                       if (editUnlocked && cellDrag.current) {
                         e.preventDefault();
@@ -690,6 +881,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       e.preventDefault();
                       const from = cellDrag.current;
                       cellDrag.current = null;
+                      disarm();
                       if (!editUnlocked || !from || (from.c === c && from.r === r)) {
                         return;
                       }
@@ -699,7 +891,17 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       commit(next);
                     }}
                   >
-                    {isEditing ? (
+                    {isEditing && type === "list" ? (
+                      <ListDropdown
+                        value={cell?.v ?? ""}
+                        options={list}
+                        onPick={(v) => {
+                          setCellValue(c, r, v);
+                          setEditing(null);
+                        }}
+                        onClose={() => setEditing(null)}
+                      />
+                    ) : isEditing ? (
                       <input
                         autoFocus
                         className="sheet-input"
@@ -721,22 +923,11 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                           }
                         }}
                       />
-                    ) : type === "list" && editUnlocked ? (
-                      <select
-                        className="sheet-select"
-                        value={cell?.v ?? ""}
-                        onChange={(e) => setCellValue(c, r, e.target.value)}
-                        onMouseDown={(e) => e.stopPropagation()}
-                      >
-                        <option value=""></option>
-                        {list.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
                     ) : (
-                      <span className="sheet-value">{displayValue(cell?.v, type)}</span>
+                      <span className="sheet-value">
+                        {displayValue(cell?.v, type)}
+                        {type === "list" && <span className="sheet-list-caret">▾</span>}
+                      </span>
                     )}
                   </div>
                 );
@@ -769,13 +960,31 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
           onPaste={doPaste}
           onColor={(v) => applyToSelection({ color: v })}
           onBg={(v) => applyToSelection({ bg: v })}
-          onType={(t, list) => setSelectionType(t, list)}
+          onType={(t) => setSelectionType(t)}
+          onListEditor={() =>
+            setListDialog({
+              c1: sel ? sel.c1 : 0,
+              c2: sel ? sel.c2 : 0,
+              options: sel ? colLists[sel.c1] ?? [] : [],
+            })
+          }
           onResize={resizeSelection}
           onSort={(dir) => sel && sortColumn(sel.c1, dir)}
           onInsertColAfter={() => addColumns(1)}
           onInsertRowAfter={() => addRows(1)}
           onDeleteColumns={() => sel && deleteColumns(sel.c1, sel.c2)}
           onDeleteRows={() => sel && deleteRows(sel.r1, sel.r2)}
+        />
+      )}
+
+      {listDialog && (
+        <ListEditorDialog
+          initial={listDialog.options}
+          onCancel={() => setListDialog(null)}
+          onSave={(options) => {
+            setSelectionType("list", options);
+            setListDialog(null);
+          }}
         />
       )}
     </div>
@@ -798,6 +1007,7 @@ function SheetMenu({
   onColor,
   onBg,
   onType,
+  onListEditor,
   onResize,
   onSort,
   onInsertColAfter,
@@ -815,7 +1025,8 @@ function SheetMenu({
   onPaste: () => void;
   onColor: (v: string) => void;
   onBg: (v: string) => void;
-  onType: (t: SheetCellType, list?: string[]) => void;
+  onType: (t: SheetCellType) => void;
+  onListEditor: () => void;
   onResize: (px: number) => void;
   onSort: (dir: "asc" | "desc") => void;
   onInsertColAfter: () => void;
@@ -859,23 +1070,7 @@ function SheetMenu({
             <button className="sheet-menu-item" onClick={() => (onType("price"), onClose())}>
               Price ($)
             </button>
-            <button
-              className="sheet-menu-item"
-              onClick={() => {
-                const raw = window.prompt(
-                  "List options (one per line or comma-separated):",
-                  listOptions.join("\n")
-                );
-                if (raw !== null) {
-                  const opts = raw
-                    .split(/[\n,]/)
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                  onType("list", opts);
-                }
-                onClose();
-              }}
-            >
+            <button className="sheet-menu-item" onClick={() => (onListEditor(), onClose())}>
               List…
             </button>
           </div>
@@ -1004,10 +1199,138 @@ function ColorMenuItem({
 }
 
 /* ------------------------------------------------------------------ */
+/* List cell dropdown (themed, replaces the native <select>)           */
+/* ------------------------------------------------------------------ */
+
+function ListDropdown({
+  value,
+  options,
+  onPick,
+  onClose,
+}: {
+  value: string;
+  options: string[];
+  onPick: (v: string) => void;
+  onClose: () => void;
+}) {
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
+
+  // Position fixed against the host cell so the scroll container can't clip it.
+  useEffect(() => {
+    const cell = anchorRef.current?.parentElement;
+    if (cell) {
+      const r = cell.getBoundingClientRect();
+      setPos({ left: r.left, top: r.bottom, width: r.width });
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <span ref={anchorRef} className="sheet-listdrop-anchor" />
+      {/* Full-screen catcher so a click anywhere else closes the dropdown. */}
+      <div className="sheet-listdrop-backdrop" onMouseDown={onClose} />
+      <div
+        className="sheet-listdrop"
+        style={pos ? { left: pos.left, top: pos.top, minWidth: pos.width } : { visibility: "hidden" }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <button className={`sheet-listopt${value === "" ? " on" : ""}`} onMouseDown={() => onPick("")}>
+          <span className="sheet-listopt-empty">— empty —</span>
+        </button>
+        {options.map((opt) => (
+          <button key={opt} className={`sheet-listopt${value === opt ? " on" : ""}`} onMouseDown={() => onPick(opt)}>
+            {opt}
+          </button>
+        ))}
+        {options.length === 0 && <div className="sheet-listopt-none">No options — set them via Type ▸ List…</div>}
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* List option editor dialog                                          */
+/* ------------------------------------------------------------------ */
+
+function ListEditorDialog({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string[];
+  onSave: (options: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [items, setItems] = useState<string[]>(initial.length ? initial : [""]);
+
+  const setAt = (i: number, v: string) => setItems((xs) => xs.map((x, j) => (j === i ? v : x)));
+  const removeAt = (i: number) => setItems((xs) => (xs.length > 1 ? xs.filter((_, j) => j !== i) : [""]));
+  const add = () => setItems((xs) => [...xs, ""]);
+
+  const save = () => {
+    const cleaned = items.map((s) => s.trim()).filter(Boolean);
+    onSave(cleaned);
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>List options</DialogTitle>
+          <DialogDescription>
+            The values a cell in this column can be set to. Each cell shows a dropdown of these.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-2 py-1">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Input
+                value={item}
+                autoFocus={i === items.length - 1}
+                placeholder={`Option ${i + 1}`}
+                className="font-mono"
+                onChange={(e) => setAt(i, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    add();
+                  }
+                }}
+              />
+              <button className="sheet-list-remove" title="Remove" onClick={() => removeAt(i)}>
+                <X />
+              </button>
+            </div>
+          ))}
+          <button className="sheet-list-add" onClick={add}>
+            <Plus /> Add option
+          </button>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={save}>Save list</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
 const ROW_HEADER_W = 44;
+const SHEET_DEFAULT_FONT_SIZE = 13;
 
 function displayValue(v: string | undefined, type: SheetCellType): string {
   if (!v) {
