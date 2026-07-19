@@ -1494,6 +1494,12 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       if (e.button !== 0) {
                         return;
                       }
+                      // Editing this very cell — let the input handle the mouse so
+                      // the caret moves and text can be selected without collapsing
+                      // the cell or stealing focus back to the grid.
+                      if (editing && editing.c === c && editing.r === r) {
+                        return;
+                      }
                       // Formula point mode: insert this cell's reference into the
                       // formula instead of selecting. preventDefault keeps the
                       // editor focused (no blur/commit). Skip the cell being edited
@@ -1522,11 +1528,12 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         }
                         return;
                       }
-                      // A click on an already-active list cell (not a fresh select)
-                      // opens its dropdown — so one click selects, the next edits.
+                      // A click on an already-active cell (not a fresh select) begins
+                      // editing it — one click selects, a second click edits (or, for
+                      // a list cell, opens its dropdown).
                       const wasSoleActive =
                         !!sel && sel.c1 === c && sel.c2 === c && sel.r1 === r && sel.r2 === r;
-                      clickToEdit.current = wasSoleActive && type === "list" && !e.shiftKey;
+                      clickToEdit.current = wasSoleActive && !e.shiftKey;
                       pressInside.current = false;
                       pendingCollapse.current = null;
                       dragging.current = true;
@@ -1579,7 +1586,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         }
                         return;
                       }
-                      if (editUnlocked && type === "list" && clickToEdit.current && !isEditing) {
+                      if (editUnlocked && clickToEdit.current && !isEditing) {
                         beginEdit(c, r);
                       }
                     }}
