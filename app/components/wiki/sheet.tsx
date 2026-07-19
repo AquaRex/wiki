@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ArrowDownAZ, ArrowUpAZ } from "lucide-react";
 import { getStore } from "~/lib/store";
 import { useAuth } from "~/lib/auth";
@@ -478,13 +478,10 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
 
   /* ---- render ---- */
 
-  const totalWidth = useMemo(() => {
-    let w = ROW_HEADER_W;
-    for (let c = 0; c < cols; c++) {
-      w += widthOf(c);
-    }
-    return w;
-  }, [cols, colWidths]);
+  let totalWidth = ROW_HEADER_W;
+  for (let c = 0; c < cols; c++) {
+    totalWidth += widthOf(c);
+  }
 
   const onGridKeyDown = (e: React.KeyboardEvent) => {
     if (!editUnlocked || editing || !sel) {
