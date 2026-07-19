@@ -173,6 +173,11 @@ export interface SheetCell {
   size?: number;
   /** Horizontal text alignment; absent = left. */
   align?: "left" | "center" | "right";
+  /** Thicker borders on individual edges (top/bottom/left/right). */
+  bt?: boolean;
+  bb?: boolean;
+  bl?: boolean;
+  br?: boolean;
 }
 
 /** The whole spreadsheet, stored as jsonb in the sheets table. */
@@ -195,7 +200,17 @@ export interface SheetData {
   freezeCols?: number;
   /** Number of leading rows frozen (kept in view when scrolling). */
   freezeRows?: number;
+  /** Manual minimum column/row counts (from "add columns/rows"). The rendered
+   *  grid is max(used data + buffer, these) so an empty sheet stays compact and
+   *  scrollbars only appear once content actually extends past the view. */
+  minCols?: number;
+  minRows?: number;
 }
+
+export const SHEET_MIN_VIEW_COLS = 8;
+export const SHEET_MIN_VIEW_ROWS = 14;
+/** Empty rows/cols kept beyond the used data so there's always room to type. */
+export const SHEET_GROW_BUFFER = 2;
 
 export const SHEET_DEFAULT_COLS = 26;
 export const SHEET_DEFAULT_ROWS = 50;

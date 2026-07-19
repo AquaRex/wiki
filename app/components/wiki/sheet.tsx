@@ -7,12 +7,20 @@ import {
   ArrowDownAZ,
   ArrowUp01,
   ArrowUpAZ,
+  Ban,
   Bold,
   ClipboardPaste,
   Copy,
+  Grid2x2,
   Italic,
+  PanelBottom,
+  PanelLeft,
+  PanelRight,
+  PanelTop,
   Plus,
   Redo2,
+  Square,
+  Table,
   Undo2,
   X,
 } from "lucide-react";
@@ -35,6 +43,9 @@ import {
   defaultSheet,
   SHEET_DEFAULT_COL_WIDTH,
   SHEET_DEFAULT_ROW_HEIGHT,
+  SHEET_GROW_BUFFER,
+  SHEET_MIN_VIEW_COLS,
+  SHEET_MIN_VIEW_ROWS,
   type SheetCell,
   type SheetCellType,
   type SheetData,
@@ -240,6 +251,7 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   // Which aggregate the format-bar readout shows for a multi-cell selection.
   const [aggFn, setAggFn] = useState<"SUM" | "AVERAGE" | "COUNT" | "MIN" | "MAX">("SUM");
   const [aggOpen, setAggOpen] = useState(false);
+  const [borderOpen, setBorderOpen] = useState(false);
 
   const disarm = () => {
     if (armTimer.current) {
@@ -349,6 +361,20 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     return () => window.removeEventListener("click", close);
   }, [aggOpen]);
 
+  // Close the border menu on any outside click.
+  useEffect(() => {
+    if (!borderOpen) {
+      return;
+    }
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest(".sheet-border")) {
+        setBorderOpen(false);
+      }
+    };
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [borderOpen]);
+
   if (status === "loading") {
     return <div className="sheet-empty">Loading sheet…</div>;
   }
@@ -356,8 +382,22 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     return <div className="sheet-empty">This sheet couldn’t be loaded.</div>;
   }
 
-  const cols = sheet.cols;
-  const rows = sheet.rows;
+  // The rendered grid grows to fit the used data (plus a small buffer) or the
+  // manual minimum — NOT a fixed 26×50 — so an empty sheet stays compact and
+  // horizontal/vertical scrollbars only appear once content extends past the view.
+  let usedMaxCol = -1;
+  let usedMaxRow = -1;
+  for (const ref of Object.keys(sheet.cells)) {
+    const { c, r } = parseRef(ref);
+    if (c > usedMaxCol) {
+      usedMaxCol = c;
+    }
+    if (r > usedMaxRow) {
+      usedMaxRow = r;
+    }
+  }
+  const cols = Math.max(usedMaxCol + 1 + SHEET_GROW_BUFFER, sheet.minCols ?? SHEET_MIN_VIEW_COLS);
+  const rows = Math.max(usedMaxRow + 1 + SHEET_GROW_BUFFER, sheet.minRows ?? SHEET_MIN_VIEW_ROWS);
   const colWidths = sheet.colWidths ?? {};
   const rowHeights = sheet.rowHeights ?? {};
   const colTypes = sheet.colTypes ?? {};
@@ -404,7 +444,11 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
       !merged.bold &&
       !merged.italic &&
       !merged.size &&
-      !merged.align;
+      !merged.align &&
+      !merged.bt &&
+      !merged.bb &&
+      !merged.bl &&
+      !merged.br;
     if (empty) {
       const { [ref]: _drop, ...rest } = draft.cells;
       draft.cells = rest;
@@ -454,6 +498,45 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   };
   const setAlign = (align: "left" | "center" | "right") =>
     applyToSelection({ align: align === "left" ? undefined : align });
+
+  /** Applies a border preset to the selection: outer edges, all cell edges,
+   *  a single side, or clears them. */
+  const applyBorders = (kind: "all" | "outer" | "top" | "bottom" | "left" | "right" | "none") => {
+    if (!sel) {
+      return;
+    }
+    const next = cloneSheet();
+    for (let c = sel.c1; c <= sel.c2; c++) {
+      for (let r = sel.r1; r <= sel.r2; r++) {
+        const patch: Partial<SheetCell> = {};
+        if (kind === "none") {
+          patch.bt = undefined;
+          patch.bb = undefined;
+          patch.bl = undefined;
+          patch.br = undefined;
+        } else if (kind === "all") {
+          patch.bt = patch.bb = patch.bl = patch.br = true;
+        } else if (kind === "outer") {
+          if (r === sel.r1) patch.bt = true;
+          if (r === sel.r2) patch.bb = true;
+          if (c === sel.c1) patch.bl = true;
+          if (c === sel.c2) patch.br = true;
+        } else if (kind === "top" && r === sel.r1) {
+          patch.bt = true;
+        } else if (kind === "bottom" && r === sel.r2) {
+          patch.bb = true;
+        } else if (kind === "left" && c === sel.c1) {
+          patch.bl = true;
+        } else if (kind === "right" && c === sel.c2) {
+          patch.br = true;
+        }
+        if (Object.keys(patch).length > 0) {
+          setCell(next, c, r, patch);
+        }
+      }
+    }
+    commit(next);
+  };
 
   /* ---- selection handlers ---- */
 
@@ -677,8 +760,8 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
 
   /* ---- structure ops ---- */
 
-  const addColumns = (n: number) => commit({ ...cloneSheet(), cols: cols + n });
-  const addRows = (n: number) => commit({ ...cloneSheet(), rows: rows + n });
+  const addColumns = (n: number) => commit({ ...cloneSheet(), minCols: cols + n });
+  const addRows = (n: number) => commit({ ...cloneSheet(), minRows: rows + n });
 
   const deleteColumns = (c1: number, c2: number) => {
     const next = cloneSheet();
@@ -1074,6 +1157,42 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
           >
             <AlignRight />
           </button>
+          <span className="sheet-fmt-sep" />
+          <span className="sheet-border">
+            <button
+              className={`sheet-fmt-btn${borderOpen ? " on" : ""}`}
+              title="Borders"
+              disabled={!sel}
+              onClick={() => setBorderOpen((o) => !o)}
+            >
+              <Table />
+            </button>
+            {borderOpen && (
+              <span className="sheet-border-pop">
+                <button className="sheet-fmt-btn" title="All borders" onClick={() => (applyBorders("all"), setBorderOpen(false))}>
+                  <Grid2x2 />
+                </button>
+                <button className="sheet-fmt-btn" title="Outer border" onClick={() => (applyBorders("outer"), setBorderOpen(false))}>
+                  <Square />
+                </button>
+                <button className="sheet-fmt-btn" title="Top border" onClick={() => (applyBorders("top"), setBorderOpen(false))}>
+                  <PanelTop />
+                </button>
+                <button className="sheet-fmt-btn" title="Bottom border" onClick={() => (applyBorders("bottom"), setBorderOpen(false))}>
+                  <PanelBottom />
+                </button>
+                <button className="sheet-fmt-btn" title="Left border" onClick={() => (applyBorders("left"), setBorderOpen(false))}>
+                  <PanelLeft />
+                </button>
+                <button className="sheet-fmt-btn" title="Right border" onClick={() => (applyBorders("right"), setBorderOpen(false))}>
+                  <PanelRight />
+                </button>
+                <button className="sheet-fmt-btn" title="No border" onClick={() => (applyBorders("none"), setBorderOpen(false))}>
+                  <Ban />
+                </button>
+              </span>
+            )}
+          </span>
 
           {/* Right-aligned readout: aggregate (multi-select) + active cell value. */}
           <span className="sheet-fmt-grow" />
@@ -1329,6 +1448,10 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       fontWeight: cell?.bold ? 700 : undefined,
                       fontStyle: cell?.italic ? "italic" : undefined,
                       fontSize: cell?.size ? `${cell.size}px` : undefined,
+                      borderTop: cell?.bt ? "2px solid var(--text-dim)" : undefined,
+                      borderBottom: cell?.bb ? "2px solid var(--text-dim)" : undefined,
+                      borderLeft: cell?.bl ? "2px solid var(--text-dim)" : undefined,
+                      borderRight: cell?.br ? "2px solid var(--text-dim)" : undefined,
                       ...(c < freezeCols ? { position: "sticky", left: frozenLeft(c), zIndex: 5 } : null),
                     }}
                     draggable={editUnlocked && !isEditing && armedCell?.c === c && armedCell?.r === r}
@@ -1458,7 +1581,16 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         setTimeout(() => ghost.remove(), 0);
                       }
                     }}
-                    onDragEnd={disarm}
+                    onDragEnd={() => {
+                      // A native drag consumes the mouseup, so our selection flag
+                      // never cleared — reset it here or the next mouse-move would
+                      // start selecting without the button held.
+                      dragging.current = false;
+                      pressInside.current = false;
+                      pendingCollapse.current = null;
+                      cellDrag.current = null;
+                      disarm();
+                    }}
                     onDragOver={(e) => {
                       if (editUnlocked && cellDrag.current) {
                         e.preventDefault();

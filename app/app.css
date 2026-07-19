@@ -2681,6 +2681,26 @@
   font-size: 12px;
   color: var(--text-dim);
 }
+/* Border menu — a small horizontal popover from the toolbar button, sitting
+   just under the toolbar rather than over the data cells. */
+.wiki .sheet-border {
+  position: relative;
+  display: inline-flex;
+}
+.wiki .sheet-border-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1000;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--card-shadow);
+}
+
 /* Right-aligned readout: aggregate + active-cell value. */
 .wiki .sheet-fmt-grow {
   flex: 1 1 auto;
