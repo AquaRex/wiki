@@ -189,6 +189,10 @@ export interface SheetData {
   colTypes?: Record<number, SheetCellType>;
   /** Allowed options for a "list"-typed column, keyed by 0-based column index. */
   colLists?: Record<number, string[]>;
+  /** Number of leading columns frozen (kept in view when scrolling). */
+  freezeCols?: number;
+  /** Number of leading rows frozen (kept in view when scrolling). */
+  freezeRows?: number;
 }
 
 export const SHEET_DEFAULT_COLS = 26;

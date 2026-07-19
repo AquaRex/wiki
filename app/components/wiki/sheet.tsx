@@ -166,12 +166,18 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   const [editing, setEditing] = useState<{ c: number; r: number } | null>(null);
   const editValue = useRef("");
   const [menu, setMenu] = useState<MenuState>(null);
-  const [clipboard, setClipboard] = useState<{ rect: Rect; cells: (SheetCell | undefined)[][] } | null>(null);
-  const cellDrag = useRef<{ c: number; r: number } | null>(null);
+  // The dragged cell; `block` is the selection rect when dragging a whole
+  // multi-cell selection (a move), null for a single cell (a copy).
+  const cellDrag = useRef<{ c: number; r: number; block: Rect | null } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Set on mousedown when a list cell was already the sole active cell, so the
   // ensuing click opens its dropdown instead of merely re-selecting.
   const clickToEdit = useRef(false);
+  // Set when the press landed inside an existing multi-cell selection: the
+  // selection is kept (not collapsed) so a hold can drag the whole block; a
+  // plain click then collapses to the pressed cell.
+  const pressInside = useRef(false);
+  const pendingCollapse = useRef<{ c: number; r: number } | null>(null);
   // A cell only becomes HTML5-draggable after a short press-and-hold, so the
   // default press gesture stays selection. Moving to select disarms it.
   const [armedCell, setArmedCell] = useState<{ c: number; r: number } | null>(null);
@@ -286,9 +292,28 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   const rowHeights = sheet.rowHeights ?? {};
   const colTypes = sheet.colTypes ?? {};
   const colLists = sheet.colLists ?? {};
+  const freezeCols = sheet.freezeCols ?? 0;
+  const freezeRows = sheet.freezeRows ?? 0;
 
   const widthOf = (c: number) => colWidths[c] ?? SHEET_DEFAULT_COL_WIDTH;
   const heightOf = (r: number) => rowHeights[r] ?? SHEET_DEFAULT_ROW_HEIGHT;
+  // Left edge (px from the grid start) of a frozen column's sticky anchor, and
+  // top edge of a frozen row's — the running sum of the sizes before it, past
+  // the row-header / column-letter gutters that are always pinned.
+  const frozenLeft = (c: number) => {
+    let x = ROW_HEADER_W;
+    for (let i = 0; i < c; i++) {
+      x += widthOf(i);
+    }
+    return x;
+  };
+  const frozenTop = (r: number) => {
+    let y = HEADER_ROW_H;
+    for (let i = 0; i < r; i++) {
+      y += heightOf(i);
+    }
+    return y;
+  };
   const typeOf = (c: number, r: number): SheetCellType =>
     sheet.cells[cellRef(c, r)]?.type ?? colTypes[c] ?? "normal";
 
@@ -408,49 +433,129 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     setMenu({ x: e.clientX, y: e.clientY, scope: selScope() });
   };
 
-  /* ---- clipboard ---- */
+  /* ---- clipboard (TSV interop with Excel / Sheets) ---- */
 
-  const doCopy = () => {
+  // The last internal copy, kept so an internal paste restores colours/types the
+  // plain-text OS clipboard can't carry. `tsv` is what we wrote to the OS
+  // clipboard; a paste whose text matches it is known to be our own copy.
+  const lastCopy = useRef<{ tsv: string; cells: (SheetCell | undefined)[][] } | null>(null);
+
+  const buildCopy = (): { tsv: string; cells: (SheetCell | undefined)[][] } | null => {
     if (!sel) {
-      return;
+      return null;
     }
-    const grid: (SheetCell | undefined)[][] = [];
+    const cells: (SheetCell | undefined)[][] = [];
     for (let r = sel.r1; r <= sel.r2; r++) {
       const row: (SheetCell | undefined)[] = [];
       for (let c = sel.c1; c <= sel.c2; c++) {
         const cell = sheet.cells[cellRef(c, r)];
         row.push(cell ? { ...cell } : undefined);
       }
-      grid.push(row);
+      cells.push(row);
     }
-    setClipboard({ rect: sel, cells: grid });
-    // Mirror plain text to the OS clipboard so external paste works too.
-    const text = grid.map((row) => row.map((cell) => cell?.v ?? "").join("\t")).join("\n");
-    navigator.clipboard?.writeText(text).catch(() => {});
+    const tsv = toTSV(cells.map((row) => row.map((cell) => cell?.v ?? "")));
+    return { tsv, cells };
   };
 
-  const doCut = () => {
-    doCopy();
-    applyToSelection({ v: "" });
+  /** Writes the selection to a clipboard event (used by native copy/cut). */
+  const writeClipboard = (e: React.ClipboardEvent): boolean => {
+    const copy = buildCopy();
+    if (!copy) {
+      return false;
+    }
+    lastCopy.current = copy;
+    e.clipboardData.setData("text/plain", copy.tsv);
+    return true;
   };
 
-  const doPaste = () => {
-    if (!clipboard || !sel) {
+  /** Fallback copy for the toolbar button (no clipboard event to write into). */
+  const doCopyButton = () => {
+    const copy = buildCopy();
+    if (!copy) {
       return;
     }
+    lastCopy.current = copy;
+    navigator.clipboard?.writeText(copy.tsv).catch(() => {});
+  };
+
+  /** Pastes clipboard text at the selection, growing the sheet to fit. Uses the
+   *  style-carrying internal copy when the text matches what we last copied. */
+  const pasteText = (text: string) => {
+    if (!sel || !text) {
+      return;
+    }
+    const startC = sel.c1;
+    const startR = sel.r1;
+    const internal = lastCopy.current && text === lastCopy.current.tsv ? lastCopy.current.cells : null;
+    const grid = internal ? internal.map((row) => row.map((cell) => cell?.v ?? "")) : fromTSV(text);
+    if (grid.length === 0) {
+      return;
+    }
+    const height = grid.length;
+    const width = Math.max(...grid.map((row) => row.length));
     const next = cloneSheet();
-    for (let dr = 0; dr < clipboard.cells.length; dr++) {
-      for (let dc = 0; dc < clipboard.cells[dr].length; dc++) {
-        const c = sel.c1 + dc;
-        const r = sel.r1 + dr;
-        if (c >= cols || r >= rows) {
-          continue;
-        }
-        const src = clipboard.cells[dr][dc];
-        setCell(next, c, r, { v: src?.v ?? "", color: src?.color, bg: src?.bg, type: src?.type });
+    next.cols = Math.max(next.cols, startC + width);
+    next.rows = Math.max(next.rows, startR + height);
+    for (let dr = 0; dr < height; dr++) {
+      for (let dc = 0; dc < grid[dr].length; dc++) {
+        const src = internal ? internal[dr][dc] : undefined;
+        setCell(next, startC + dc, startR + dr, {
+          v: grid[dr][dc] ?? "",
+          color: src?.color,
+          bg: src?.bg,
+          type: src?.type,
+          bold: src?.bold,
+          italic: src?.italic,
+          size: src?.size,
+        });
       }
     }
     commit(next);
+    setSel({ c1: startC, r1: startR, c2: startC + width - 1, r2: startR + height - 1 });
+  };
+
+  const doPasteButton = () => {
+    navigator.clipboard
+      ?.readText()
+      .then((text) => pasteText(text))
+      .catch(() => {});
+  };
+
+  const doCutButton = () => {
+    doCopyButton();
+    applyToSelection({ v: "" });
+  };
+
+  /** Moves a whole block of cells by (dc, dr) — clears the source, overwrites
+   *  the destination — and follows it with the selection. */
+  const moveBlock = (block: Rect, dc: number, dr: number) => {
+    if (block.c1 + dc < 0 || block.r1 + dr < 0) {
+      return; // would move off the top / left edge
+    }
+    const next = cloneSheet();
+    const moved: { ref: string; cell: SheetCell }[] = [];
+    for (let cc = block.c1; cc <= block.c2; cc++) {
+      for (let rr = block.r1; rr <= block.r2; rr++) {
+        const cell = next.cells[cellRef(cc, rr)];
+        if (cell) {
+          moved.push({ ref: cellRef(cc + dc, rr + dr), cell });
+        }
+        delete next.cells[cellRef(cc, rr)];
+      }
+    }
+    // Clear the destination region, then drop the moved cells in.
+    for (let cc = block.c1 + dc; cc <= block.c2 + dc; cc++) {
+      for (let rr = block.r1 + dr; rr <= block.r2 + dr; rr++) {
+        delete next.cells[cellRef(cc, rr)];
+      }
+    }
+    for (const m of moved) {
+      next.cells[m.ref] = m.cell;
+    }
+    next.cols = Math.max(next.cols, block.c2 + dc + 1);
+    next.rows = Math.max(next.rows, block.r2 + dr + 1);
+    commit(next);
+    setSel({ c1: block.c1 + dc, r1: block.r1 + dr, c2: block.c2 + dc, r2: block.r2 + dr });
   };
 
   /* ---- structure ops ---- */
@@ -596,21 +701,8 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     };
     if (e.ctrlKey || e.metaKey) {
       const key = e.key.toLowerCase();
-      if (key === "c") {
-        e.preventDefault();
-        doCopy();
-        return;
-      }
-      if (key === "x") {
-        e.preventDefault();
-        doCut();
-        return;
-      }
-      if (key === "v") {
-        e.preventDefault();
-        doPaste();
-        return;
-      }
+      // Copy / cut / paste are handled by the native clipboard events on the
+      // grid (so Excel/Sheets interop works both ways) — not intercepted here.
       if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -675,10 +767,10 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
             <Redo2 />
           </button>
           <span className="sheet-fmt-sep" />
-          <button className="sheet-fmt-btn" title="Copy (Ctrl+C)" disabled={!sel} onClick={doCopy}>
+          <button className="sheet-fmt-btn" title="Copy (Ctrl+C)" disabled={!sel} onClick={doCopyButton}>
             <Copy />
           </button>
-          <button className="sheet-fmt-btn" title="Paste (Ctrl+V)" disabled={!clipboard || !sel} onClick={doPaste}>
+          <button className="sheet-fmt-btn" title="Paste (Ctrl+V)" disabled={!sel} onClick={doPasteButton}>
             <ClipboardPaste />
           </button>
           <span className="sheet-fmt-sep" />
@@ -713,6 +805,27 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
         className="sheet-scroll"
         tabIndex={0}
         onKeyDown={onGridKeyDown}
+        onCopy={(e) => {
+          if (!editing && writeClipboard(e)) {
+            e.preventDefault();
+          }
+        }}
+        onCut={(e) => {
+          if (!editing && editUnlocked && writeClipboard(e)) {
+            e.preventDefault();
+            applyToSelection({ v: "" });
+          }
+        }}
+        onPaste={(e) => {
+          if (editing || !editUnlocked) {
+            return;
+          }
+          const text = e.clipboardData.getData("text/plain");
+          if (text) {
+            e.preventDefault();
+            pasteText(text);
+          }
+        }}
         onMouseUp={() => {
           dragging.current = false;
           disarm();
@@ -725,12 +838,17 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
         <div className="sheet-grid" style={{ width: totalWidth }}>
           {/* Header row: corner + column letters */}
           <div className="sheet-row sheet-head-row">
-            <div className="sheet-corner" style={{ width: ROW_HEADER_W }} />
+            <div className="sheet-corner" style={{ width: ROW_HEADER_W, zIndex: 20 }} />
             {Array.from({ length: cols }, (_, c) => (
               <div
                 key={c}
-                className={`sheet-colhead${sel && sel.c1 <= c && c <= sel.c2 ? " sel" : ""}`}
-                style={{ width: widthOf(c) }}
+                className={`sheet-colhead${sel && sel.c1 <= c && c <= sel.c2 ? " sel" : ""}${
+                  c < freezeCols ? " frozen" : ""
+                }${c === freezeCols - 1 ? " freeze-edge" : ""}`}
+                style={{
+                  width: widthOf(c),
+                  ...(c < freezeCols ? { position: "sticky", left: frozenLeft(c), zIndex: 11 } : null),
+                }}
                 onClick={(e) => {
                   if (e.shiftKey && anchor.current) {
                     selectColumns(anchor.current.c, c);
@@ -765,10 +883,18 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
 
           {/* Data rows */}
           {Array.from({ length: rows }, (_, r) => (
-            <div className="sheet-row" key={r} style={{ height: heightOf(r) }}>
+            <div
+              className={`sheet-row${r < freezeRows ? " frozen-row" : ""}${
+                r === freezeRows - 1 ? " freeze-edge-row" : ""
+              }`}
+              key={r}
+              style={{ height: heightOf(r), ...(r < freezeRows ? { position: "sticky", top: frozenTop(r), zIndex: 8 } : null) }}
+            >
               <div
-                className={`sheet-rowhead${sel && sel.r1 <= r && r <= sel.r2 ? " sel" : ""}`}
-                style={{ width: ROW_HEADER_W }}
+                className={`sheet-rowhead${sel && sel.r1 <= r && r <= sel.r2 ? " sel" : ""}${
+                  r < freezeRows ? " frozen" : ""
+                }`}
+                style={{ width: ROW_HEADER_W, ...(r < freezeRows ? { zIndex: 9 } : null) }}
                 onClick={(e) => {
                   if (e.shiftKey && anchor.current) {
                     selectRows(anchor.current.r, r);
@@ -811,7 +937,9 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                     key={c}
                     className={`sheet-cell${selected ? " sel" : ""}${
                       selected && sel && sel.c1 === c && sel.r1 === r ? " active" : ""
-                    }${isEditing && type === "list" ? " editing-list" : ""}`}
+                    }${isEditing && type === "list" ? " editing-list" : ""}${c < freezeCols ? " frozen-col" : ""}${
+                      c === freezeCols - 1 ? " freeze-edge" : ""
+                    }`}
                     style={{
                       width: widthOf(c),
                       color: colorToCss(cell?.color),
@@ -819,10 +947,28 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       fontWeight: cell?.bold ? 700 : undefined,
                       fontStyle: cell?.italic ? "italic" : undefined,
                       fontSize: cell?.size ? `${cell.size}px` : undefined,
+                      ...(c < freezeCols ? { position: "sticky", left: frozenLeft(c), zIndex: 5 } : null),
                     }}
                     draggable={editUnlocked && !isEditing && armedCell?.c === c && armedCell?.r === r}
                     onMouseDown={(e) => {
                       if (e.button !== 0) {
+                        return;
+                      }
+                      scrollRef.current?.focus({ preventScroll: true });
+                      const multiSel = !!sel && (sel.c1 !== sel.c2 || sel.r1 !== sel.r2);
+                      // Pressing inside an existing multi-selection keeps it (so a
+                      // hold can drag the whole block); a plain click collapses it.
+                      if (multiSel && rectHas(sel, c, r) && !e.shiftKey) {
+                        clickToEdit.current = false;
+                        pressInside.current = true;
+                        pendingCollapse.current = { c, r };
+                        dragging.current = false;
+                        if (editUnlocked) {
+                          if (armTimer.current) {
+                            clearTimeout(armTimer.current);
+                          }
+                          armTimer.current = setTimeout(() => setArmedCell({ c, r }), 300);
+                        }
                         return;
                       }
                       // A click on an already-active list cell (not a fresh select)
@@ -830,9 +976,10 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       const wasSoleActive =
                         !!sel && sel.c1 === c && sel.c2 === c && sel.r1 === r && sel.r2 === r;
                       clickToEdit.current = wasSoleActive && type === "list" && !e.shiftKey;
+                      pressInside.current = false;
+                      pendingCollapse.current = null;
                       dragging.current = true;
                       selectCell(c, r, e.shiftKey);
-                      scrollRef.current?.focus({ preventScroll: true });
                       // Arm this cell for dragging only after a press-and-hold, so
                       // a normal press still starts a selection drag.
                       if (editUnlocked && !e.shiftKey) {
@@ -849,9 +996,28 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                         clickToEdit.current = false;
                         disarm();
                         setSel(normRect(anchor.current, { c, r }));
+                      } else if (pressInside.current && pendingCollapse.current && !armedCell) {
+                        // Pressed inside a selection then moved before the block
+                        // armed → begin a fresh selection from the pressed cell.
+                        const start = pendingCollapse.current;
+                        pressInside.current = false;
+                        pendingCollapse.current = null;
+                        disarm();
+                        dragging.current = true;
+                        anchor.current = start;
+                        setSel(normRect(start, { c, r }));
                       }
                     }}
                     onClick={() => {
+                      if (pressInside.current && pendingCollapse.current) {
+                        const p = pendingCollapse.current;
+                        pressInside.current = false;
+                        pendingCollapse.current = null;
+                        if (!armedCell) {
+                          selectCell(p.c, p.r, false);
+                        }
+                        return;
+                      }
                       if (editUnlocked && type === "list" && clickToEdit.current && !isEditing) {
                         beginEdit(c, r);
                       }
@@ -868,8 +1034,11 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       openMenu(e);
                     }}
                     onDragStart={(e) => {
-                      cellDrag.current = { c, r };
-                      e.dataTransfer.setData("text/plain", cell?.v ?? "");
+                      const isBlock = !!sel && rectHas(sel, c, r) && (sel.c1 !== sel.c2 || sel.r1 !== sel.r2);
+                      cellDrag.current = { c, r, block: isBlock ? sel : null };
+                      pressInside.current = false;
+                      pendingCollapse.current = null;
+                      e.dataTransfer.setData("text/plain", isBlock ? "" : cell?.v ?? "");
                     }}
                     onDragEnd={disarm}
                     onDragOver={(e) => {
@@ -882,12 +1051,27 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                       const from = cellDrag.current;
                       cellDrag.current = null;
                       disarm();
-                      if (!editUnlocked || !from || (from.c === c && from.r === r)) {
+                      if (!editUnlocked || !from) {
+                        return;
+                      }
+                      if (from.block) {
+                        moveBlock(from.block, c - from.c, r - from.r);
+                        return;
+                      }
+                      if (from.c === c && from.r === r) {
                         return;
                       }
                       const src = sheet.cells[cellRef(from.c, from.r)];
                       const next = cloneSheet();
-                      setCell(next, c, r, { v: src?.v ?? "", color: src?.color, bg: src?.bg, type: src?.type });
+                      setCell(next, c, r, {
+                        v: src?.v ?? "",
+                        color: src?.color,
+                        bg: src?.bg,
+                        type: src?.type,
+                        bold: src?.bold,
+                        italic: src?.italic,
+                        size: src?.size,
+                      });
                       commit(next);
                     }}
                   >
@@ -913,13 +1097,18 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
                             e.preventDefault();
                             commitEdit();
                             selectCell(c, Math.min(r + 1, rows - 1), false);
+                            // Return focus to the grid so the newly-selected cell
+                            // is immediately typeable (start typing to edit it).
+                            scrollRef.current?.focus({ preventScroll: true });
                           } else if (e.key === "Escape") {
                             e.preventDefault();
                             setEditing(null);
+                            scrollRef.current?.focus({ preventScroll: true });
                           } else if (e.key === "Tab") {
                             e.preventDefault();
                             commitEdit();
                             selectCell(Math.min(c + 1, cols - 1), r, false);
+                            scrollRef.current?.focus({ preventScroll: true });
                           }
                         }}
                       />
@@ -951,13 +1140,13 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
       {menu && editUnlocked && (
         <SheetMenu
           menu={menu}
-          hasClipboard={!!clipboard}
-          activeColumn={sel ? sel.c1 : 0}
-          listOptions={sel ? colLists[sel.c1] ?? [] : []}
+          selEndCol={sel ? sel.c2 : 0}
+          selEndRow={sel ? sel.r2 : 0}
+          frozen={freezeCols > 0 || freezeRows > 0}
           onClose={() => setMenu(null)}
-          onCut={doCut}
-          onCopy={doCopy}
-          onPaste={doPaste}
+          onCut={doCutButton}
+          onCopy={doCopyButton}
+          onPaste={doPasteButton}
           onColor={(v) => applyToSelection({ color: v })}
           onBg={(v) => applyToSelection({ bg: v })}
           onType={(t) => setSelectionType(t)}
@@ -968,6 +1157,9 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
               options: sel ? colLists[sel.c1] ?? [] : [],
             })
           }
+          onFreezeCols={() => commit({ ...cloneSheet(), freezeCols: sel ? sel.c2 + 1 : 0 })}
+          onFreezeRows={() => commit({ ...cloneSheet(), freezeRows: sel ? sel.r2 + 1 : 0 })}
+          onUnfreeze={() => commit({ ...cloneSheet(), freezeCols: 0, freezeRows: 0 })}
           onResize={resizeSelection}
           onSort={(dir) => sel && sortColumn(sel.c1, dir)}
           onInsertColAfter={() => addColumns(1)}
@@ -997,9 +1189,9 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
 
 function SheetMenu({
   menu,
-  hasClipboard,
-  activeColumn,
-  listOptions,
+  selEndCol,
+  selEndRow,
+  frozen,
   onClose,
   onCut,
   onCopy,
@@ -1008,6 +1200,9 @@ function SheetMenu({
   onBg,
   onType,
   onListEditor,
+  onFreezeCols,
+  onFreezeRows,
+  onUnfreeze,
   onResize,
   onSort,
   onInsertColAfter,
@@ -1016,9 +1211,9 @@ function SheetMenu({
   onDeleteRows,
 }: {
   menu: NonNullable<MenuState>;
-  hasClipboard: boolean;
-  activeColumn: number;
-  listOptions: string[];
+  selEndCol: number;
+  selEndRow: number;
+  frozen: boolean;
   onClose: () => void;
   onCut: () => void;
   onCopy: () => void;
@@ -1027,6 +1222,9 @@ function SheetMenu({
   onBg: (v: string) => void;
   onType: (t: SheetCellType) => void;
   onListEditor: () => void;
+  onFreezeCols: () => void;
+  onFreezeRows: () => void;
+  onUnfreeze: () => void;
   onResize: (px: number) => void;
   onSort: (dir: "asc" | "desc") => void;
   onInsertColAfter: () => void;
@@ -1051,9 +1249,23 @@ function SheetMenu({
       <button className="sheet-menu-item" onClick={() => (onCopy(), onClose())}>
         Copy
       </button>
-      <button className="sheet-menu-item" disabled={!hasClipboard} onClick={() => (onPaste(), onClose())}>
+      <button className="sheet-menu-item" onClick={() => (onPaste(), onClose())}>
         Paste
       </button>
+
+      <div className="sheet-menu-sep" />
+
+      <button className="sheet-menu-item" onClick={() => (onFreezeCols(), onClose())}>
+        Freeze up to column {colName(selEndCol)}
+      </button>
+      <button className="sheet-menu-item" onClick={() => (onFreezeRows(), onClose())}>
+        Freeze up to row {selEndRow + 1}
+      </button>
+      {frozen && (
+        <button className="sheet-menu-item" onClick={() => (onUnfreeze(), onClose())}>
+          Unfreeze all
+        </button>
+      )}
 
       <div className="sheet-menu-sep" />
 
@@ -1330,6 +1542,7 @@ function ListEditorDialog({
 /* ------------------------------------------------------------------ */
 
 const ROW_HEADER_W = 44;
+const HEADER_ROW_H = 30;
 const SHEET_DEFAULT_FONT_SIZE = 13;
 
 function displayValue(v: string | undefined, type: SheetCellType): string {
@@ -1341,6 +1554,78 @@ function displayValue(v: string | undefined, type: SheetCellType): string {
     return isNaN(n) ? v : `$${v}`;
   }
   return v;
+}
+
+/** Serialises a value grid to TSV, quoting fields that contain a tab, newline
+ *  or quote so Excel / Google Sheets round-trip them. */
+function toTSV(grid: string[][]): string {
+  return grid
+    .map((row) =>
+      row
+        .map((v) => {
+          const s = v ?? "";
+          if (/[\t\n\r"]/.test(s)) {
+            return `"${s.replace(/"/g, '""')}"`;
+          }
+          return s;
+        })
+        .join("\t")
+    )
+    .join("\n");
+}
+
+/** Parses TSV (as pasted from Excel / Sheets) into a value grid, honouring
+ *  quoted fields that may contain tabs, newlines and escaped ("") quotes. */
+function fromTSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  let i = 0;
+  const push = () => {
+    row.push(field);
+    field = "";
+  };
+  const pushRow = () => {
+    push();
+    rows.push(row);
+    row = [];
+  };
+  // Strip a single trailing newline so a copied block doesn't yield a blank row.
+  const src = text.replace(/\r\n/g, "\n").replace(/\n$/, "");
+  while (i < src.length) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        quoted = false;
+        i++;
+        continue;
+      }
+      field += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' && field === "") {
+      quoted = true;
+      i++;
+    } else if (ch === "\t") {
+      push();
+      i++;
+    } else if (ch === "\n") {
+      pushRow();
+      i++;
+    } else {
+      field += ch;
+      i++;
+    }
+  }
+  pushRow();
+  return rows;
 }
 
 /** Parses an A1-style ref back to 0-based { c, r }. */

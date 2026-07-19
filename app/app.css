@@ -2409,6 +2409,19 @@
 .wiki .sheet-cell.active {
   box-shadow: inset 0 0 0 2px var(--waccent);
 }
+/* Frozen cells must be opaque so scrolled content can't show through, and a
+   heavier rule marks the boundary between the frozen panes and the scroll area. */
+.wiki .sheet-cell.frozen-col {
+  background: var(--surface);
+}
+.wiki .sheet-cell.freeze-edge,
+.wiki .sheet-colhead.freeze-edge {
+  border-right: 2px solid var(--border-strong);
+}
+.wiki .sheet-row.freeze-edge-row .sheet-cell,
+.wiki .sheet-row.freeze-edge-row .sheet-rowhead {
+  border-bottom: 2px solid var(--border-strong);
+}
 .wiki .sheet-value {
   padding: 4px 8px;
   width: 100%;
