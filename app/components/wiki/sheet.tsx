@@ -252,6 +252,8 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   const [aggFn, setAggFn] = useState<"SUM" | "AVERAGE" | "COUNT" | "MIN" | "MAX">("SUM");
   const [aggOpen, setAggOpen] = useState(false);
   const [borderOpen, setBorderOpen] = useState(false);
+  // Measured width of the scroll viewport, so the default grid fills it exactly.
+  const [viewW, setViewW] = useState(0);
 
   const disarm = () => {
     if (armTimer.current) {
@@ -361,6 +363,18 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
     return () => window.removeEventListener("click", close);
   }, [aggOpen]);
 
+  // Track the scroll viewport width so the default column count fills it.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const ro = new ResizeObserver(() => setViewW(el.clientWidth));
+    ro.observe(el);
+    setViewW(el.clientWidth);
+    return () => ro.disconnect();
+  }, [status]);
+
   // Close the border menu on any outside click.
   useEffect(() => {
     if (!borderOpen) {
@@ -387,7 +401,13 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
   // horizontal/vertical scrollbars only appear once content extends past the view.
   let usedMaxCol = -1;
   let usedMaxRow = -1;
-  for (const ref of Object.keys(sheet.cells)) {
+  for (const [ref, cell] of Object.entries(sheet.cells)) {
+    // Only cells with an actual value extend the grid — a formatting-only cell
+    // (e.g. from colouring a whole row) is still empty and must not force the
+    // grid wider/taller or a scrollbar would always show.
+    if (!cell.v || cell.v.trim() === "") {
+      continue;
+    }
     const { c, r } = parseRef(ref);
     if (c > usedMaxCol) {
       usedMaxCol = c;
@@ -396,8 +416,6 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
       usedMaxRow = r;
     }
   }
-  const cols = Math.max(usedMaxCol + 1 + SHEET_GROW_BUFFER, sheet.minCols ?? SHEET_MIN_VIEW_COLS);
-  const rows = Math.max(usedMaxRow + 1 + SHEET_GROW_BUFFER, sheet.minRows ?? SHEET_MIN_VIEW_ROWS);
   const colWidths = sheet.colWidths ?? {};
   const rowHeights = sheet.rowHeights ?? {};
   const colTypes = sheet.colTypes ?? {};
@@ -407,6 +425,23 @@ function SheetGrid({ pagePath, sheetKey }: { pagePath: string; sheetKey: string 
 
   const widthOf = (c: number) => colWidths[c] ?? SHEET_DEFAULT_COL_WIDTH;
   const heightOf = (r: number) => rowHeights[r] ?? SHEET_DEFAULT_ROW_HEIGHT;
+
+  // How many columns fit the measured viewport width — the default minimum, so
+  // an empty sheet fills the panel exactly without spilling into a scrollbar.
+  let fitCols = 0;
+  if (viewW > 0) {
+    let acc = ROW_HEADER_W;
+    while (fitCols < 200) {
+      acc += widthOf(fitCols);
+      if (acc > viewW) {
+        break;
+      }
+      fitCols += 1;
+    }
+  }
+  const minCols = sheet.minCols ?? (fitCols > 0 ? fitCols : SHEET_MIN_VIEW_COLS);
+  const cols = Math.max(usedMaxCol + 1 + SHEET_GROW_BUFFER, minCols);
+  const rows = Math.max(usedMaxRow + 1 + SHEET_GROW_BUFFER, sheet.minRows ?? SHEET_MIN_VIEW_ROWS);
   // Left edge (px from the grid start) of a frozen column's sticky anchor, and
   // top edge of a frozen row's — the running sum of the sizes before it, past
   // the row-header / column-letter gutters that are always pinned.
