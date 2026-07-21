@@ -217,16 +217,22 @@ const CODE_KEYWORDS = new Set(
 );
 
 /**
- * A raw, verbatim text block — like a code block but with no markdown parsing,
- * no syntax highlighting, and a "Copy all" button. Delimited by a `~~~` fence so
- * the content may freely contain backticks (```), colons, or other markup that
- * would otherwise break a normal code fence.
+ * A fenced code block. One component covers every ``` fence:
+ *   ```               → plain verbatim text, no highlighting (same as ```text)
+ *   ```text: Label     → plain verbatim text with a header label
+ *   ```c#: EnemyAI.cs  → C# syntax highlighting, header label + language badge
+ * A `text` (or empty) language means no highlighting and the body wraps like the
+ * old raw block; a real language tints keywords/comments. Every block gets a
+ * "Copy all" button so any fenced content is one click to copy.
  */
-function RawBlock({ text, label }: { text: string; label?: string }) {
+function CodeBlock({ code, lang, label }: { code: string; lang?: string; label?: string }) {
   const [copied, setCopied] = useState(false);
+  const language = (lang || "").trim();
+  const highlight = language !== "" && language.toLowerCase() !== "text";
+  const title = label || (highlight ? language : "TEXT");
   const copy = () => {
     navigator.clipboard
-      .writeText(text)
+      .writeText(code)
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
@@ -236,14 +242,17 @@ function RawBlock({ text, label }: { text: string; label?: string }) {
       });
   };
   return (
-    <div className="code raw">
+    <div className={highlight ? "code" : "code raw"}>
       <div className="file">
-        <span>{label || "TEXT"}</span>
+        <span>
+          {title}
+          {label && highlight && <span className="lang">{language}</span>}
+        </span>
         <button type="button" className="raw-copy" onClick={copy}>
           {copied ? "Copied" : "Copy all"}
         </button>
       </div>
-      <pre>{text}</pre>
+      <pre>{highlight ? highlightCode(code) : code}</pre>
     </div>
   );
 }
@@ -972,23 +981,21 @@ function splitHeadingImage(text: string): {
 
 /**
  * Scans page text for every heading, in order, mirroring how renderBlocks
- * detects and numbers them: ## sections carry a running auto-number, code and
- * raw fences are skipped so a `## ` inside them isn't picked up. The slug and
+ * detects and numbers them: ## sections carry a running auto-number, code
+ * fences are skipped so a `## ` inside them isn't picked up. The slug and
  * label match what the Heading component renders, so a :::contents link lands
  * on the right element. `h2Start` continues the numbering from earlier blocks.
  */
 export function extractHeadings(text: string, h2Start = 0): PageHeading[] {
   const out: PageHeading[] = [];
   let h2 = h2Start;
-  let fence: string | null = null;
+  let inFence = false;
   for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
-    const fenceMatch = /^(```|~{3,})/.exec(line);
-    if (fenceMatch) {
-      const marker = fenceMatch[1].startsWith("`") ? "```" : "~~~";
-      fence = fence === null ? marker : fence === marker ? null : fence;
+    if (line.startsWith("```")) {
+      inFence = !inFence;
       continue;
     }
-    if (fence !== null) {
+    if (inFence) {
       continue;
     }
     let level = 0;
@@ -1415,32 +1422,11 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       continue;
     }
 
-    // Raw verbatim block: `~~~` (optionally `~~~~`… for content containing ~~~).
-    // No markdown, no highlighting; closes on a fence at least as long as it
-    // opened, so the body may contain backticks and other markup safely.
-    const rawFence = /^(~{3,})[ \t]*(.*)$/.exec(line);
-    if (rawFence) {
-      const fence = rawFence[1];
-      const label = rawFence[2].trim();
-      const rawLines: string[] = [];
-      i++;
-      const closeRe = new RegExp(`^~{${fence.length},}\\s*$`);
-      while (i < lines.length && !closeRe.test(lines[i])) {
-        rawLines.push(lines[i]);
-        i++;
-      }
-      i++;
-      out.push(
-        <React.Fragment key={bk("raw", rawLines.join("\n"))}>
-          <RawBlock text={rawLines.join("\n")} label={label || undefined} />
-        </React.Fragment>
-      );
-      continue;
-    }
-
     if (line.startsWith("```")) {
       const spec = line.slice(3).trim();
-      const [lang, file] = spec.includes(":") ? [spec.split(":")[0], spec.split(":").slice(1).join(":")] : [spec, ""];
+      const [lang, label] = spec.includes(":")
+        ? [spec.split(":")[0].trim(), spec.split(":").slice(1).join(":").trim()]
+        : [spec, ""];
       const codeLines: string[] = [];
       i++;
       while (i < lines.length && !lines[i].startsWith("```")) {
@@ -1449,15 +1435,9 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       }
       i++;
       out.push(
-        <div key={bk("code", codeLines.join("\n"))} className="code">
-          {(lang || file) && (
-            <div className="file">
-              <span>{file || lang}</span>
-              {file && <span className="lang">{lang}</span>}
-            </div>
-          )}
-          <pre>{highlightCode(codeLines.join("\n"))}</pre>
-        </div>
+        <React.Fragment key={bk("code", codeLines.join("\n"))}>
+          <CodeBlock code={codeLines.join("\n")} lang={lang || undefined} label={label || undefined} />
+        </React.Fragment>
       );
       continue;
     }
@@ -1680,7 +1660,7 @@ function renderBlocks(text: string, ctx: RenderContext, h2Start: number): React.
       lines[i].trim() &&
       // "::" opens or closes a tone region and ends the paragraph; a bare
       // ":" (the inline tone marker) does not.
-      !/^(```|~{3,}|:::|::(?:error|warn|good|tips|muted)\b|::\s*$|#|\^ |>|\||\s*[-*]\s|\s*\d+\.\s|!\[|-{3,}\s*$|\*{3,}\s*$)/.test(
+      !/^(```|:::|::(?:error|warn|good|tips|muted)\b|::\s*$|#|\^ |>|\||\s*[-*]\s|\s*\d+\.\s|!\[|-{3,}\s*$|\*{3,}\s*$)/.test(
         lines[i].trim()
       )
     ) {

@@ -140,8 +140,8 @@ const SNIPPETS: Snippet[] = [
   { label: "Image sized", icon: <ImageIcon className="size-3.5" />, text: "![caption](/uploads/example.png){w=300}", block: true },
   { label: "Image right", icon: <ImageIcon className="size-3.5" />, text: "![caption](/uploads/example.png >){w=260}", block: true },
   { label: "Image full", icon: <ImageIcon className="size-3.5" />, text: "![caption](/uploads/example.png){w=max}", block: true },
-  { label: "Code block", icon: <Code2 className="size-3.5" />, text: "```csharp:EnemyAI.cs\n// code here\n```", block: true },
-  { label: "Raw text", icon: <FileText className="size-3.5" />, text: "~~~ Label\nPaste raw text here — backticks and any markup are shown verbatim.\n~~~", block: true, wrap: ["~~~\n", "\n~~~"] },
+  { label: "Code block", icon: <Code2 className="size-3.5" />, text: "```csharp: EnemyAI.cs\n// code here\n```", block: true, wrap: ["```csharp\n", "\n```"] },
+  { label: "Text block", icon: <FileText className="size-3.5" />, text: "```text: Label\nPaste raw text here — backticks and any markup are shown verbatim.\n```", block: true, wrap: ["```text\n", "\n```"] },
   {
     label: "Table",
     icon: <Table2 className="size-3.5" />,
