@@ -171,6 +171,7 @@ const SNIPPETS: Snippet[] = [
   },
   { label: "Flow", icon: <GitBranch className="size-3.5" />, text: ":::flow\nFirst thing happens\nThen this\nFinally this\n:::", block: true },
   { label: "Steps", icon: <ListOrdered className="size-3.5" />, text: ":::steps\n- **First step** — what to do and why\n- **Second step** — what to do and why\n:::", block: true },
+  { label: "Collapsible", icon: <ChevronDown className="size-3.5" />, text: ":::collapsable Label\nHidden until expanded — **formatting** works inside.\n:::", block: true, wrap: [":::collapsable Label\n", "\n:::"] },
   { label: "Contents", icon: <List className="size-3.5" />, text: ":::contents On this page\n:::", block: true },
   { label: "Contents mini", icon: <PanelRight className="size-3.5" />, text: ":::contents mini(>) On this page\n:::", block: true },
   { label: "Roadmap", icon: <KanbanSquare className="size-3.5" />, text: ":::roadmap\n:::", block: true },

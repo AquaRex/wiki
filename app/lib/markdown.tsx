@@ -1319,6 +1319,18 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
         </ol>
       );
     }
+    // A native <details> box: the param is the clickable summary, the body is
+    // hidden until expanded. Native so it toggles with no JS and stays open on
+    // re-render. Accepts either spelling.
+    case "collapsable":
+    case "collapsible": {
+      return (
+        <details key={k()} className="collapsible">
+          <summary>{renderInline(dir.param || "Details", ctx)}</summary>
+          <div className="collapsible-body">{renderMarkdown(body.join("\n"), ctx)}</div>
+        </details>
+      );
+    }
     default:
       return (
         <div key={k()} className="note">
