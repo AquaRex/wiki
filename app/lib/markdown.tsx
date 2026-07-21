@@ -1078,11 +1078,23 @@ function parseContentsParam(param: string): ContentsOptions {
   const all = /\ball\b/i.test(rest);
   const vertical = /\bvertical\b/i.test(rest);
   const mini = /\bmini\b/i.test(rest);
-  const header = rest
+  let header = rest
     .replace(/\ball\b/i, "")
     .replace(/\bvertical\b/i, "")
     .replace(/\bmini\b/i, "")
     .trim();
+
+  // A mini may also carry a bare trailing pin — `:::contents mini On this page <`
+  // or just `:::contents mini <` — like an :::infobox does, not only the
+  // parenthesised `mini(<)` form. Only read it when no parens pin was given.
+  if (mini && !align.set) {
+    const bare = splitImageAlign(header);
+    if (bare.align.set) {
+      align = bare.align;
+      header = bare.src;
+    }
+  }
+
   return { all, vertical, mini, align, only, header };
 }
 
