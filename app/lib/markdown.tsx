@@ -228,7 +228,8 @@ const CODE_KEYWORDS = new Set(
 function CodeBlock({ code, lang, label }: { code: string; lang?: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   const language = (lang || "").trim();
-  const highlight = language !== "" && language.toLowerCase() !== "text";
+  const PLAIN = new Set(["text", "txt", "plain", "plaintext", "none", "raw"]);
+  const highlight = language !== "" && !PLAIN.has(language.toLowerCase());
   const title = label || (highlight ? language : "TEXT");
   const copy = () => {
     navigator.clipboard

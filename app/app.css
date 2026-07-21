@@ -330,7 +330,9 @@
 }
 .wiki .code.raw pre {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
+  overflow-x: hidden;
 }
 .wiki .raw-copy {
   font-family: var(--font-mono);
