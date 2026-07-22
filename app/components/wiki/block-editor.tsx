@@ -176,6 +176,7 @@ const SNIPPETS: Snippet[] = [
   { label: "Contents", icon: <List className="size-3.5" />, text: ":::contents On this page\n:::", block: true },
   { label: "Contents mini", icon: <PanelRight className="size-3.5" />, text: ":::contentsmini On this page >\n:::", block: true },
   { label: "Window", icon: <AppWindow className="size-3.5" />, text: ":::window(w=300)(>)\n==Information==\n| Health | 100 |\n| Stamina | 50 |\n:::", block: true, wrap: [":::window(w=300)(>)\n", "\n:::"] },
+  { label: "HTML embed", icon: <Code2 className="size-3.5" />, text: ":::html\n<!doctype html>\n<html><body style=\"font:14px sans-serif;color:#e6edf3;background:#161b22;padding:16px\">\n  <h2>Hello from a sandboxed page</h2>\n  <p>Paste a self-contained HTML document here — styles and scripts run isolated.</p>\n</body></html>\n:::", block: true, wrap: [":::html\n", "\n:::"] },
   { label: "Roadmap", icon: <KanbanSquare className="size-3.5" />, text: ":::roadmap\n:::", block: true },
   { label: "Cells", icon: <Table className="size-3.5" />, text: ":::cells\n:::", block: true },
   { label: "Blueprint", icon: <GitBranch className="size-3.5" />, text: ":::blueprint\nPaste copied Unreal Blueprint nodes here.\n:::", block: true, wrap: [":::blueprint\n", "\n:::"] },
@@ -419,6 +420,7 @@ function BlockEditorPanel({
     const draftTerms = resolveTermsForPage(collectTermDefs([draftPage]), ctx.currentPath);
     return {
       ...ctx,
+      editing: true,
       variables: { ...ctx.variables, ...draftVars },
       terms: { ...(ctx.terms ?? {}), ...draftTerms },
     };

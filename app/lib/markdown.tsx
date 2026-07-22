@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { UnrealGraph } from "~/components/wiki/unreal-graph";
 import { Roadmap } from "~/components/wiki/roadmap";
 import { Sheet } from "~/components/wiki/sheet";
+import { HtmlEmbed } from "~/components/wiki/html-embed";
 import { openLightbox } from "~/components/wiki/lightbox";
 
 export interface RenderVariable {
@@ -42,6 +43,9 @@ export interface RenderContext {
    * (e.g. a hover card), in which case :::contents has nothing to show.
    */
   headings?: PageHeading[];
+  /** True inside the editor's live preview — heavy embeds (e.g. :::html) show a
+   *  click-to-run placeholder rather than mounting and restarting on each keystroke. */
+  editing?: boolean;
 }
 
 export interface PageHeading {
@@ -1183,6 +1187,48 @@ function Window({
   );
 }
 
+interface HtmlOpts {
+  width: number | null;
+  height: number | null;
+  noscroll: boolean;
+  device: number | null;
+}
+
+/**
+ * Parses the options after `:::html`, in the same parenthesised style as :::window:
+ *   (w=300 h=300)      — fixed box; content scrolls inside if larger
+ *   (w=300 h=300)(noscroll) — fixed box; the whole document is scaled to fit
+ *   (w=320 h=640)(device=390) — render at a 390px phone width, scaled into the box
+ * `w`/`h` accept the same `w=`/`h=` tokens as image sizes; `w=max` means fill.
+ */
+function parseHtmlParams(param: string): HtmlOpts {
+  let width: number | null = null;
+  let height: number | null = null;
+  let noscroll = false;
+  let device: number | null = null;
+  for (const group of param.match(/\(([^)]*)\)/g) ?? []) {
+    const inner = group.slice(1, -1).trim();
+    if (!inner) {
+      continue;
+    }
+    if (/^noscroll$/i.test(inner)) {
+      noscroll = true;
+    } else if (/\bdevice\s*=/i.test(inner)) {
+      const m = /=\s*(\d{2,4})/.exec(inner);
+      device = m ? Number(m[1]) : null;
+    } else {
+      const size = parseImageSize(inner);
+      if (size.width !== null) {
+        width = size.width === "max" ? null : size.width;
+      }
+      if (size.height !== null) {
+        height = size.height;
+      }
+    }
+  }
+  return { width, height, noscroll, device };
+}
+
 function Heading({
   level,
   text,
@@ -1391,6 +1437,22 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
         <Window key={k()} align={opts.align} width={opts.width ?? 300} height={opts.height} padding={opts.padding}>
           {renderMarkdown(body.join("\n"), ctx)}
         </Window>
+      );
+    }
+    // Raw HTML rendered in a sandboxed, origin-isolated iframe — scripts run but
+    // can't reach the wiki, cookies or the viewer's session. Body is verbatim.
+    case "html": {
+      const opts = parseHtmlParams(dir.param);
+      return (
+        <HtmlEmbed
+          key={k()}
+          html={body.join("\n")}
+          width={opts.width}
+          height={opts.height}
+          noscroll={opts.noscroll}
+          device={opts.device}
+          editing={ctx.editing}
+        />
       );
     }
     /*

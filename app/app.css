@@ -418,6 +418,60 @@
   margin-bottom: 0;
 }
 
+/* :::html — a self-contained document in a sandboxed iframe. */
+.wiki .html-embed {
+  margin: 20px 0;
+  max-width: 100%;
+}
+.wiki .window .html-embed {
+  margin: 0;
+}
+.wiki .html-embed-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: #0a0d12;
+  color-scheme: normal;
+}
+/* Clip box for the scaled (noscroll / device) modes. */
+.wiki .html-embed-clip {
+  overflow: hidden;
+  border-radius: 8px;
+  background: #0a0d12;
+}
+.wiki .html-embed-clip .html-embed-frame {
+  border-radius: 0;
+}
+/* Click-to-run placeholder shown in the editor preview. */
+.wiki .html-embed-ph {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 18px 20px;
+  text-align: left;
+  cursor: pointer;
+  background: var(--code-bg, #0a0d12);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+}
+.wiki .html-embed-ph:hover {
+  border-color: var(--waccent);
+}
+.wiki .html-embed-ph-run {
+  font-weight: 600;
+  color: var(--waccent);
+}
+.wiki .html-embed-ph-meta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
 /*
  * The per-block wrapper carries no box, so a float (an :::infobox, a floated
  * image, or a :::contents mini) in one block escapes into the following blocks
