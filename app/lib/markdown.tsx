@@ -1098,6 +1098,91 @@ function parseContentsParam(param: string): ContentsOptions {
   return { all, vertical, mini, align, only, header };
 }
 
+interface WindowOpts {
+  /** Pixel width, "max" to fill, or null for the default. */
+  width: number | "max" | null;
+  height: number | null;
+  align: ImageAlign;
+  /** Inner padding in px; null means the window default (none). */
+  padding: number | null;
+}
+
+/**
+ * Parses the parenthesised options after `:::window`, in any order:
+ *   (w=300) / (w=300, h=200) / (w=max)   — size, same tokens as image {…}
+ *   (>) (<) (c) (^v)                     — pin, same <>c^v tokens as images
+ *   (p=12) / (pad)                       — inner padding (default 14 when bare)
+ * Each is its own `(...)` group so a size never collides with a pin.
+ */
+function parseWindowParams(param: string): WindowOpts {
+  let width: number | "max" | null = null;
+  let height: number | null = null;
+  let padding: number | null = null;
+  let align: ImageAlign = { h: "right", v: "top", set: false };
+  for (const group of param.match(/\(([^)]*)\)/g) ?? []) {
+    const inner = group.slice(1, -1).trim();
+    if (!inner) {
+      continue;
+    }
+    if (/^[<>cv^\s]+$/i.test(inner)) {
+      align = splitImageAlign(`x ${inner}`).align;
+    } else if (/^pad$/i.test(inner) || /\bp(?:ad(?:ding)?)?\s*=/i.test(inner)) {
+      const m = /=\s*(\d{1,3})/.exec(inner);
+      padding = m ? Number(m[1]) : 14;
+    } else {
+      const size = parseImageSize(inner);
+      if (size.width !== null) {
+        width = size.width;
+      }
+      if (size.height !== null) {
+        height = size.height;
+      }
+    }
+  }
+  return { width, height, align, padding };
+}
+
+/**
+ * The shared floating card that :::window, :::infobox and :::contentsmini all
+ * render into — one box model, so the three stay pixel-identical. It floats and
+ * pushes surrounding text aside using the same <>c^v pins as images. Width
+ * defaults to 300px; padding defaults to none so an image can fill it edge to edge.
+ */
+function Window({
+  align,
+  width = 300,
+  height = null,
+  padding = null,
+  className,
+  children,
+}: {
+  align: ImageAlign;
+  width?: number | "max" | null;
+  height?: number | null;
+  padding?: number | null;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const cls = ["window", align.set ? alignClasses(align) : "", className].filter(Boolean).join(" ");
+  const style: React.CSSProperties = {};
+  if (width === "max") {
+    style.width = "100%";
+  } else if (typeof width === "number") {
+    style.width = width;
+  }
+  if (typeof height === "number") {
+    style.height = height;
+  }
+  if (typeof padding === "number") {
+    style.padding = padding;
+  }
+  return (
+    <div className={cls} style={style}>
+      {children}
+    </div>
+  );
+}
+
 function Heading({
   level,
   text,
@@ -1135,6 +1220,58 @@ const CALLOUT_ICONS: Record<string, string> = {
   good: "✓",
   tips: "i",
 };
+
+/** Picks the headings a :::contents / :::contentsmini box lists, honouring the
+ *  `all` and `[a,b]` options. Returns null when there is nothing to show. */
+function selectTocItems(opts: ContentsOptions, ctx: RenderContext): PageHeading[] | null {
+  let items = ctx.headings ?? [];
+  if (opts.only) {
+    // An explicit [a,b,c] list picks headings by name, keeping the author's order.
+    const want = opts.only.map((s) => s.toLowerCase());
+    items = want
+      .map((name) => items.find((h) => h.text.trim().toLowerCase() === name))
+      .filter((h): h is PageHeading => h !== undefined);
+  } else if (!opts.all) {
+    items = items.filter((h) => h.level === 2);
+  }
+  return items.length ? items : null;
+}
+
+/** The inner of a contents box — heading label, optional subtext, and the link
+ *  list — shared by the full :::contents card and the floating :::contentsmini. */
+function tocNav(items: PageHeading[], opts: ContentsOptions, sub: string | undefined, ctx: RenderContext, cls: string): React.ReactNode {
+  return (
+    <nav key={k()} className={cls} aria-label="Contents">
+      <p className="label">{opts.header ? renderInline(opts.header, ctx) : "Contents"}</p>
+      {sub && <p className="toc-sub">{renderInline(sub.slice(2), ctx)}</p>}
+      <ul>
+        {items.map((h) => (
+          <li key={k()} className={`toc-l${h.level}`}>
+            <Link className="anchor" to={`#${h.slug}`} preventScrollReset>
+              {h.num !== undefined && <span className="toc-num">{String(h.num).padStart(2, "0")}</span>}
+              <span>{renderInline(h.text, ctx)}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+/** The floating contents card (:::contentsmini, or :::contents mini) — the TOC
+ *  list dropped into the shared Window so it pins and sizes like an :::infobox. */
+function renderContentsMini(opts: ContentsOptions, dir: DirectiveLines, ctx: RenderContext): React.ReactNode {
+  const items = selectTocItems(opts, ctx);
+  if (!items) {
+    return null;
+  }
+  const sub = dir.lines.map((l) => l.trim()).find((l) => l.startsWith("^ "));
+  return (
+    <Window key={k()} align={opts.align} width={300} className="contentsmini">
+      {tocNav(items, opts, sub, ctx, "contents-box mini")}
+    </Window>
+  );
+}
 
 function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNode {
   const body = dir.lines;
@@ -1221,9 +1358,10 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
           }
         }
       }
-      const infoboxClass = `infobox${align.set ? ` ${alignClasses(align)}` : ""}`;
+      // A quick-info card is just a Window with a fixed structure — title bar,
+      // optional image, label/value rows — so it shares the window box model.
       return (
-        <aside key={k()} className={infoboxClass}>
+        <Window key={k()} align={align} width={300} className="infobox">
           {title && <div className="ib-title">{renderInline(title, ctx)}</div>}
           {image && <Asset ctx={ctx} src={image} alt={title} />}
           {rows.length > 0 && (
@@ -1241,7 +1379,18 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
               {renderInline(line, ctx)}
             </div>
           ))}
-        </aside>
+        </Window>
+      );
+    }
+    // A free-form floating card. Unlike :::infobox it imposes no inner structure —
+    // any markdown goes inside — and its size/pin/padding are set explicitly:
+    // `:::window(w=300)(>)`. It's the backend :::infobox and :::contentsmini use.
+    case "window": {
+      const opts = parseWindowParams(dir.param);
+      return (
+        <Window key={k()} align={opts.align} width={opts.width ?? 300} height={opts.height} padding={opts.padding}>
+          {renderMarkdown(body.join("\n"), ctx)}
+        </Window>
       );
     }
     /*
@@ -1252,46 +1401,25 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
      */
     case "contents": {
       const opts = parseContentsParam(dir.param);
-      let items = ctx.headings ?? [];
-      if (opts.only) {
-        // An explicit [a,b,c] list picks headings by name, keeping the order the
-        // author wrote — so the box can be a hand-curated subset, not the page order.
-        const want = opts.only.map((s) => s.toLowerCase());
-        items = want
-          .map((name) => items.find((h) => h.text.trim().toLowerCase() === name))
-          .filter((h): h is PageHeading => h !== undefined);
-      } else if (!opts.all) {
-        items = items.filter((h) => h.level === 2);
+      // `:::contents mini` is the old spelling of the standalone :::contentsmini
+      // directive; route it there so both produce the identical floating box.
+      if (opts.mini) {
+        return renderContentsMini(opts, dir, ctx);
       }
-      if (items.length === 0) {
+      const items = selectTocItems(opts, ctx);
+      if (!items) {
         return null;
       }
       // A "^ subheader" line in the body becomes the box's subtext, like a heading's.
       const sub = dir.lines.map((l) => l.trim()).find((l) => l.startsWith("^ "));
-      const cls = [
-        "contents-box",
-        opts.vertical && "vertical",
-        opts.mini && "mini",
-        opts.mini && opts.align.set && alignClasses(opts.align),
-      ]
-        .filter(Boolean)
-        .join(" ");
-      return (
-        <nav key={k()} className={cls} aria-label="Contents">
-          <p className="label">{opts.header ? renderInline(opts.header, ctx) : "Contents"}</p>
-          {sub && <p className="toc-sub">{renderInline(sub.slice(2), ctx)}</p>}
-          <ul>
-            {items.map((h) => (
-              <li key={k()} className={`toc-l${h.level}`}>
-                <Link className="anchor" to={`#${h.slug}`} preventScrollReset>
-                  {h.num !== undefined && <span className="toc-num">{String(h.num).padStart(2, "0")}</span>}
-                  <span>{renderInline(h.text, ctx)}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      );
+      const cls = ["contents-box", opts.vertical && "vertical"].filter(Boolean).join(" ");
+      return tocNav(items, opts, sub, ctx, cls);
+    }
+    // A table of contents as a floating window — set up exactly like :::infobox
+    // (header text + trailing <>c^v pin), backed by the shared Window box.
+    case "contentsmini": {
+      // "mini " primes parseContentsParam to read the trailing pin like :::infobox.
+      return renderContentsMini(parseContentsParam(`mini ${dir.param}`), dir, ctx);
     }
     case "flow": {
       const steps = body.map((l) => l.trim()).filter(Boolean);

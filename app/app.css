@@ -548,16 +548,20 @@
   padding: 1px 6px;
   flex: none;
 }
-/* "mini" — a compact card that floats beside the text like an infobox. It pins
-   with the same <>c^v tokens (mini(>v)); default is float right, top. Zero top
-   margin keeps it flush with the section-top content beside it (see .infobox). */
-.wiki .contents-box.mini {
-  float: right;
-  clear: right;
-  width: 300px;
-  margin: 0 0 20px 28px;
+/* ":::contentsmini" — the TOC inside a shared .window (which supplies the card,
+   float, pin and width). The inner list sheds its own card so it doesn't
+   double-box, and tightens to the compact look. */
+.wiki .window.contentsmini {
   padding: 16px 18px;
   font-size: 13px;
+}
+.wiki .contents-box.mini {
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
 }
 .wiki .contents-box.mini ul {
   columns: 1;
@@ -568,37 +572,9 @@
 .wiki .contents-box.mini .label {
   font-size: 11px;
 }
-.wiki .contents-box.mini.h-left {
-  float: left;
-  clear: left;
-  margin: 0 28px 20px 0;
-}
-.wiki .contents-box.mini.h-right {
-  float: right;
-  clear: right;
-  margin: 0 0 20px 28px;
-}
-.wiki .contents-box.mini.h-center {
-  float: none;
-  clear: both;
-  margin: 22px auto;
-}
-.wiki .contents-box.mini.v-bottom {
-  clear: both;
-}
 @media (max-width: 640px) {
   .wiki .contents-box ul {
     columns: 1;
-  }
-}
-@media (max-width: 720px) {
-  .wiki .contents-box.mini,
-  .wiki .contents-box.mini.h-left,
-  .wiki .contents-box.mini.h-right,
-  .wiki .contents-box.mini.h-center {
-    float: none;
-    width: 100%;
-    margin: 18px 0;
   }
 }
 
@@ -1196,8 +1172,13 @@
   }
 }
 
-/* Infobox — floated quick-info card */
-.wiki .infobox {
+/*
+ * Window — the shared floating card behind :::window, :::infobox and
+ * :::contentsmini. It floats and pushes text aside, pinned with the same <>c^v
+ * tokens as images. Width defaults to 300px (overridable inline); padding
+ * defaults to none so an image can fill it edge to edge.
+ */
+.wiki .window {
   float: right;
   clear: right;
   width: 300px;
@@ -1211,27 +1192,37 @@
   overflow: hidden;
   font-size: 13.5px;
 }
-/* Pin overrides — same <>c^v tokens as images, written after the title. */
-.wiki .infobox.h-left {
+/* Pin overrides — same <>c^v tokens as images. */
+.wiki .window.h-left {
   float: left;
   clear: left;
   margin: 0 28px 20px 0;
 }
-.wiki .infobox.h-right {
+.wiki .window.h-right {
   float: right;
   clear: right;
   margin: 0 0 20px 28px;
 }
 /* Centre means a plain centred block, not a float — text sits above and below. */
-.wiki .infobox.h-center {
+.wiki .window.h-center {
   float: none;
   clear: both;
   margin: 22px auto;
 }
 /* Bottom clears preceding floats so the box drops below them, mirroring images. */
-.wiki .infobox.v-bottom {
+.wiki .window.v-bottom {
   clear: both;
 }
+/* A first/last child fills to the window edge (an image, a row grid) — trim the
+   gap the browser leaves so padding: 0 truly reaches the border. */
+.wiki .window > :first-child {
+  margin-top: 0;
+}
+.wiki .window > :last-child {
+  margin-bottom: 0;
+}
+
+/* Infobox — a Window with a fixed quick-info structure. */
 .wiki .infobox .ib-title {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1276,12 +1267,12 @@
   border-top: 1px solid var(--wborder);
 }
 @media (max-width: 720px) {
-  .wiki .infobox,
-  .wiki .infobox.h-left,
-  .wiki .infobox.h-right,
-  .wiki .infobox.h-center {
+  .wiki .window,
+  .wiki .window.h-left,
+  .wiki .window.h-right,
+  .wiki .window.h-center {
     float: none;
-    width: 100%;
+    width: 100% !important;
     margin: 18px 0;
   }
 }

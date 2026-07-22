@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRevalidator } from "react-router";
 import {
+  AppWindow,
   ArrowDown,
   ArrowUp,
   Baseline,
@@ -173,7 +174,8 @@ const SNIPPETS: Snippet[] = [
   { label: "Steps", icon: <ListOrdered className="size-3.5" />, text: ":::steps\n- **First step** — what to do and why\n- **Second step** — what to do and why\n:::", block: true },
   { label: "Collapsible", icon: <ChevronDown className="size-3.5" />, text: ":::collapsable Label\nHidden until expanded — **formatting** works inside.\n:::", block: true, wrap: [":::collapsable Label\n", "\n:::"] },
   { label: "Contents", icon: <List className="size-3.5" />, text: ":::contents On this page\n:::", block: true },
-  { label: "Contents mini", icon: <PanelRight className="size-3.5" />, text: ":::contents mini(>) On this page\n:::", block: true },
+  { label: "Contents mini", icon: <PanelRight className="size-3.5" />, text: ":::contentsmini On this page >\n:::", block: true },
+  { label: "Window", icon: <AppWindow className="size-3.5" />, text: ":::window(w=300)(>)\n==Information==\n| Health | 100 |\n| Stamina | 50 |\n:::", block: true, wrap: [":::window(w=300)(>)\n", "\n:::"] },
   { label: "Roadmap", icon: <KanbanSquare className="size-3.5" />, text: ":::roadmap\n:::", block: true },
   { label: "Cells", icon: <Table className="size-3.5" />, text: ":::cells\n:::", block: true },
   { label: "Blueprint", icon: <GitBranch className="size-3.5" />, text: ":::blueprint\nPaste copied Unreal Blueprint nodes here.\n:::", block: true, wrap: [":::blueprint\n", "\n:::"] },
