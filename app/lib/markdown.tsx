@@ -1464,6 +1464,30 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
         />
       );
     }
+    // A live external site in the same sandboxed frame as :::html, sized the same
+    // way — `:::embed(https://example.com)(h=600)`. The URL is the first paren
+    // group; sizing options follow. Cross-origin, so auto-height isn't available
+    // (a set height is used) and sites that forbid framing won't load.
+    case "embed": {
+      const groups = dir.param.match(/\(([^)]*)\)/g) ?? [];
+      let url = groups[0] ? groups[0].slice(1, -1).trim() : "";
+      if (url && !/^https?:\/\//i.test(url)) {
+        url = "https://" + url;
+      }
+      const opts = parseHtmlParams(groups.slice(1).join(""));
+      return (
+        <HtmlEmbed
+          key={k()}
+          src={url}
+          width={opts.width}
+          height={opts.height}
+          noscroll={opts.noscroll}
+          device={opts.device}
+          full={opts.full}
+          editing={ctx.editing}
+        />
+      );
+    }
     /*
      * A table of contents that builds itself from the page's headings, so it
      * stays in sync as headings are added, removed or renamed. The `param` after

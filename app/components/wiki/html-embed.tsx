@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 export interface HtmlEmbedProps {
-  html: string;
+  /** Inline HTML document to render (from :::html). */
+  html?: string;
+  /** External URL to load live (from :::embed). Mutually exclusive with `html`. */
+  src?: string;
   /** Fixed box width in px; null fills the available width. */
   width: number | null;
   /** Fixed box height in px; null lets the content report its own height. */
@@ -19,9 +22,10 @@ export interface HtmlEmbedProps {
 }
 
 /**
- * A small script appended to the embedded document so the parent can size the
- * frame without needing same-origin access (the sandbox withholds it). It only
- * ever posts two numbers, which the parent reads and nothing else.
+ * A small script appended to an inline document so the parent can size the frame
+ * without needing same-origin access (the sandbox withholds it). It only ever
+ * posts two numbers, which the parent reads and nothing else. Not usable for an
+ * external URL — a cross-origin frame can't be measured, so those keep a set height.
  */
 const SIZE_REPORTER = `
 <script>
@@ -47,18 +51,22 @@ function withReporter(html: string): string {
   return html + SIZE_REPORTER;
 }
 
-export function HtmlEmbed({ html, width, height, noscroll, device, full, editing }: HtmlEmbedProps) {
+const DEFAULT_H = 480;
+
+export function HtmlEmbed({ html, src, width, height, noscroll, device, full, editing }: HtmlEmbedProps) {
+  const external = src != null;
+  const validSrc = external && /^https?:\/\//i.test(src ?? "");
   const [run, setRun] = useState(!editing);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [content, setContent] = useState({ w: 0, h: 0 });
 
   useEffect(() => {
     setRun(!editing);
-  }, [editing, html]);
+  }, [editing, html, src]);
 
   useEffect(() => {
-    if (!run) {
-      return;
+    if (!run || external) {
+      return; // an external cross-origin frame can't post its size back
     }
     const onMessage = (e: MessageEvent) => {
       if (!frameRef.current || e.source !== frameRef.current.contentWindow) {
@@ -71,21 +79,58 @@ export function HtmlEmbed({ html, width, height, noscroll, device, full, editing
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [run]);
+  }, [run, external]);
+
+  if (external && !validSrc) {
+    return (
+      <div className="html-embed">
+        <div className="html-embed-ph">
+          <span className="html-embed-ph-run">Invalid embed URL</span>
+          <span className="html-embed-ph-meta">only http(s) URLs can be embedded</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!run) {
-    const lines = html.split("\n").length;
+    const meta = external ? src : `embedded document · ${(html ?? "").split("\n").length} lines`;
     return (
       <div className="html-embed">
         <button type="button" className="html-embed-ph" onClick={() => setRun(true)}>
-          <span className="html-embed-ph-run">▷ Run HTML</span>
-          <span className="html-embed-ph-meta">embedded document · {lines} lines · sandboxed</span>
+          <span className="html-embed-ph-run">▷ {external ? "Load site" : "Run HTML"}</span>
+          <span className="html-embed-ph-meta">{meta} · sandboxed</span>
         </button>
       </div>
     );
   }
 
-  const srcDoc = withReporter(html);
+  // One frame element for every mode, sourced from a URL or inline HTML. An
+  // external URL keeps a permissive-but-capped sandbox (its scripts/login work,
+  // but it can't navigate the wiki away); inline HTML is origin-isolated.
+  const renderFrame = (style: React.CSSProperties) =>
+    external ? (
+      <iframe
+        ref={frameRef}
+        className="html-embed-frame"
+        title="Embedded site"
+        src={src}
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-pointer-lock"
+        allow="fullscreen"
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        style={style}
+      />
+    ) : (
+      <iframe
+        ref={frameRef}
+        className="html-embed-frame"
+        title="Embedded HTML"
+        sandbox="allow-scripts"
+        srcDoc={withReporter(html ?? "")}
+        style={style}
+      />
+    );
+
   const scaled = noscroll || device != null;
 
   // Full-bleed: break out of the wiki column (CSS handles the width/offset) and
@@ -95,14 +140,7 @@ export function HtmlEmbed({ html, width, height, noscroll, device, full, editing
     const padY = height != null ? height : 0;
     return (
       <div className="html-embed full" style={{ padding: `${padY}px ${padX}px` }}>
-        <iframe
-          ref={frameRef}
-          className="html-embed-frame"
-          title="Embedded HTML"
-          sandbox="allow-scripts"
-          srcDoc={srcDoc}
-          style={{ width: "100%", height: content.h ? content.h : 480 }}
-        />
+        {renderFrame({ width: "100%", height: content.h || DEFAULT_H })}
       </div>
     );
   }
@@ -112,67 +150,34 @@ export function HtmlEmbed({ html, width, height, noscroll, device, full, editing
   // responsively and scrolls inside its "screen" if taller.
   if (device != null && width != null && height != null) {
     const scale = width / device;
-    const logicalH = height / scale;
     return (
       <div className="html-embed" style={{ width }}>
         <div className="html-embed-clip" style={{ width, height }}>
-          <iframe
-            ref={frameRef}
-            className="html-embed-frame"
-            title="Embedded HTML"
-            sandbox="allow-scripts"
-            srcDoc={srcDoc}
-            style={{
-              width: device,
-              height: logicalH,
-              transform: `scale(${scale})`,
-              transformOrigin: "top left",
-            }}
-          />
+          {renderFrame({ width: device, height: height / scale, transform: `scale(${scale})`, transformOrigin: "top left" })}
         </div>
       </div>
     );
   }
 
   // Fit-to-box: shrink the whole document so it fits inside the box with no
-  // scrollbars. Needs the reported content size, so it snaps in once measured.
+  // scrollbars. Needs the reported content size (inline HTML only), so it snaps
+  // in once measured; an external URL can't be measured and stays at scale 1.
   if (scaled && width != null && height != null) {
     const scale = content.w && content.h ? Math.min(width / content.w, height / content.h) : 1;
     return (
       <div className="html-embed" style={{ width }}>
         <div className="html-embed-clip" style={{ width, height }}>
-          <iframe
-            ref={frameRef}
-            className="html-embed-frame"
-            title="Embedded HTML"
-            sandbox="allow-scripts"
-            srcDoc={srcDoc}
-            style={{
-              width: content.w || width,
-              height: content.h || height,
-              transform: `scale(${scale})`,
-              transformOrigin: "top left",
-            }}
-          />
+          {renderFrame({ width: content.w || width, height: content.h || height, transform: `scale(${scale})`, transformOrigin: "top left" })}
         </div>
       </div>
     );
   }
 
-  // Fixed box that scrolls, or auto-height that fills the width.
-  const style: React.CSSProperties = {};
-  style.width = width != null ? width : "100%";
-  style.height = height != null ? height : content.h ? content.h : 480;
+  // Fixed box that scrolls, or auto-height that fills the width. An external URL
+  // has no measured height, so auto falls back to DEFAULT_H — set (h=…) to size it.
   return (
     <div className="html-embed" style={width != null ? { width } : undefined}>
-      <iframe
-        ref={frameRef}
-        className="html-embed-frame"
-        title="Embedded HTML"
-        sandbox="allow-scripts"
-        srcDoc={srcDoc}
-        style={style}
-      />
+      {renderFrame({ width: width != null ? width : "100%", height: height != null ? height : content.h || DEFAULT_H })}
     </div>
   );
 }
