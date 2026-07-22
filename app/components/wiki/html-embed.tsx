@@ -13,9 +13,13 @@ export interface HtmlEmbedProps {
   noscroll: boolean;
   /** Logical "device" width to render at, then scale into the box (phone preview). */
   device: number | null;
-  /** Break out of the wiki column to fill the whole content area. In this mode
-   *  `width`/`height` are read as horizontal/vertical padding, not a size. */
+  /** Break out of the wiki column to fill the whole content area (auto width). */
   full: boolean;
+  /** Inner padding in px — side padding / top-bottom padding. */
+  padX?: number;
+  padY?: number;
+  /** Horizontal placement of a fixed-width embed within the column. */
+  align?: "left" | "center" | "right";
   /** In the editor's live preview we don't auto-run — a heavy script would restart
    *  on every keystroke — so we show a click-to-run placeholder instead. */
   editing?: boolean;
@@ -53,8 +57,9 @@ function withReporter(html: string): string {
 
 const DEFAULT_H = 480;
 
-export function HtmlEmbed({ html, src, width, height, noscroll, device, full, editing }: HtmlEmbedProps) {
+export function HtmlEmbed({ html, src, width, height, noscroll, device, full, padX = 0, padY = 0, align, editing }: HtmlEmbedProps) {
   const external = src != null;
+  const wrapCls = align && align !== "left" ? `html-embed h-${align}` : "html-embed";
   const validSrc = external && /^https?:\/\//i.test(src ?? "");
   const [run, setRun] = useState(!editing);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -134,13 +139,13 @@ export function HtmlEmbed({ html, src, width, height, noscroll, device, full, ed
   const scaled = noscroll || device != null;
 
   // Full-bleed: break out of the wiki column (CSS handles the width/offset) and
-  // fill the content area. width/height are re-read as side / top-bottom padding.
+  // fill the content area. Height is fixed when given, else auto/default; padX/padY
+  // pad the inside.
   if (full) {
-    const padX = width != null ? width : 0;
-    const padY = height != null ? height : 0;
+    const h = height != null ? height : content.h || DEFAULT_H;
     return (
       <div className="html-embed full" style={{ padding: `${padY}px ${padX}px` }}>
-        {renderFrame({ width: "100%", height: content.h || DEFAULT_H })}
+        {renderFrame({ width: "100%", height: h })}
       </div>
     );
   }
@@ -151,7 +156,7 @@ export function HtmlEmbed({ html, src, width, height, noscroll, device, full, ed
   if (device != null && width != null && height != null) {
     const scale = width / device;
     return (
-      <div className="html-embed" style={{ width }}>
+      <div className={wrapCls} style={{ width }}>
         <div className="html-embed-clip" style={{ width, height }}>
           {renderFrame({ width: device, height: height / scale, transform: `scale(${scale})`, transformOrigin: "top left" })}
         </div>
@@ -165,7 +170,7 @@ export function HtmlEmbed({ html, src, width, height, noscroll, device, full, ed
   if (scaled && width != null && height != null) {
     const scale = content.w && content.h ? Math.min(width / content.w, height / content.h) : 1;
     return (
-      <div className="html-embed" style={{ width }}>
+      <div className={wrapCls} style={{ width }}>
         <div className="html-embed-clip" style={{ width, height }}>
           {renderFrame({ width: content.w || width, height: content.h || height, transform: `scale(${scale})`, transformOrigin: "top left" })}
         </div>
@@ -175,8 +180,12 @@ export function HtmlEmbed({ html, src, width, height, noscroll, device, full, ed
 
   // Fixed box that scrolls, or auto-height that fills the width. An external URL
   // has no measured height, so auto falls back to DEFAULT_H — set (h=…) to size it.
+  const boxStyle: React.CSSProperties = { padding: padX || padY ? `${padY}px ${padX}px` : undefined };
+  if (width != null) {
+    boxStyle.width = width;
+  }
   return (
-    <div className="html-embed" style={width != null ? { width } : undefined}>
+    <div className={wrapCls} style={boxStyle}>
       {renderFrame({ width: width != null ? width : "100%", height: height != null ? height : content.h || DEFAULT_H })}
     </div>
   );

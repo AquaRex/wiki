@@ -426,6 +426,15 @@
 .wiki .window .html-embed {
   margin: 0;
 }
+/* Placement of a fixed-width embed within the column. */
+.wiki .html-embed.h-center {
+  margin-left: auto;
+  margin-right: auto;
+}
+.wiki .html-embed.h-right {
+  margin-left: auto;
+  margin-right: 0;
+}
 /*
  * Full-bleed (:::html(auto)) — escape the centred column and fill the content
  * area. `--fb-inset` is the left sidebar's width so the break-out stops at the
@@ -1287,6 +1296,13 @@
 /* Bottom clears preceding floats so the box drops below them, mirroring images. */
 .wiki .window.v-bottom {
   clear: both;
+}
+/* Auto width — a full-column-width block instead of a fixed float. */
+.wiki .window.wfull {
+  float: none;
+  clear: both;
+  width: 100%;
+  margin: 20px 0;
 }
 /* A first/last child fills to the window edge (an image, a row grid) — trim the
    gap the browser leaves so padding: 0 truly reaches the border. */

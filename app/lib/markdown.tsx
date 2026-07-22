@@ -1102,27 +1102,92 @@ function parseContentsParam(param: string): ContentsOptions {
   return { all, vertical, mini, align, only, header };
 }
 
-interface WindowOpts {
-  /** Pixel width, "max" to fill, or null for the default. */
+/**
+ * One shared box grammar for :::window, :::html and :::embed. Parenthesised
+ * groups, where the FIRST size group sets the box and later size groups are
+ * padding:
+ *
+ *   size group  — up to two space-separated slots [width height]; each slot is a
+ *                 number, `w=`/`h=` (or `max`), or `auto`:
+ *                   (w=300 h=200)   fixed both      (auto)        fill both axes
+ *                   (auto h=1000)   auto width      (w=500 auto)  auto height
+ *   padding     — any size group AFTER the first: `w=`/bare → side padding,
+ *                 `h=` → top/bottom padding; `pad=`/`px=`/`py=` work anywhere:
+ *                   (auto)(w=24)    full width, 24px side padding
+ *                   (auto h=800)(h=12)  auto width, 800 tall, 12px vertical pad
+ *   pin         — a pure `<>c^v` group aligns the box:  (>)  (c)  (^v)
+ *   extras      — (noscroll) and (device=390) for :::html / :::embed
+ *
+ * `auto` width means "fill the available space" (full-bleed for html/embed, full
+ * column width for window); `auto`/omitted height means content height.
+ */
+interface BoxParams {
   width: number | "max" | null;
+  /** `auto` in the width slot — fill the available width. */
+  widthAuto: boolean;
   height: number | null;
+  padX: number;
+  padY: number;
   align: ImageAlign;
-  /** Inner padding in px; null means the window default (none). */
-  padding: number | null;
+  noscroll: boolean;
+  device: number | null;
 }
 
-/**
- * Parses the parenthesised options after `:::window`, in any order:
- *   (w=300) / (w=300, h=200) / (w=max)   — size, same tokens as image {…}
- *   (>) (<) (c) (^v)                     — pin, same <>c^v tokens as images
- *   (p=12) / (pad)                       — inner padding (default 14 when bare)
- * Each is its own `(...)` group so a size never collides with a pin.
- */
-function parseWindowParams(param: string): WindowOpts {
+function parseBoxParams(param: string): BoxParams {
   let width: number | "max" | null = null;
+  let widthAuto = false;
   let height: number | null = null;
-  let padding: number | null = null;
+  let padX = 0;
+  let padY = 0;
   let align: ImageAlign = { h: "right", v: "top", set: false };
+  let noscroll = false;
+  let device: number | null = null;
+  let sizeSeen = false;
+
+  const readSize = (inner: string) => {
+    inner.split(/[\s,]+/).filter(Boolean).forEach((tok, i) => {
+      if (/^auto$/i.test(tok)) {
+        if (i === 0) {
+          widthAuto = true;
+        }
+        return; // auto in the height slot just leaves height null (= auto)
+      }
+      const wm = /^(?:w|width)\s*=\s*(max|\d{1,4})$/i.exec(tok);
+      const hm = /^(?:h|height)\s*=\s*(\d{1,5})$/i.exec(tok);
+      const nm = /^(\d{1,5})$/.exec(tok);
+      if (wm) {
+        width = /max/i.test(wm[1]) ? "max" : Number(wm[1]);
+      } else if (hm) {
+        height = Number(hm[1]);
+      } else if (nm) {
+        if (i === 0) {
+          width = Number(nm[1]);
+        } else {
+          height = Number(nm[1]);
+        }
+      }
+    });
+  };
+
+  const readPad = (inner: string) => {
+    const p = /\bpad\s*=\s*(\d{1,3})/i.exec(inner);
+    if (p) {
+      padX = padY = Number(p[1]);
+    }
+    const x = /\b(?:px|w|width)\s*=\s*(\d{1,3})/i.exec(inner);
+    if (x) {
+      padX = Number(x[1]);
+    }
+    const y = /\b(?:py|h|height)\s*=\s*(\d{1,3})/i.exec(inner);
+    if (y) {
+      padY = Number(y[1]);
+    }
+    const nm = /^(\d{1,3})$/.exec(inner.trim());
+    if (nm && !p && !x && !y) {
+      padX = Number(nm[1]);
+    }
+  };
+
   for (const group of param.match(/\(([^)]*)\)/g) ?? []) {
     const inner = group.slice(1, -1).trim();
     if (!inner) {
@@ -1130,20 +1195,21 @@ function parseWindowParams(param: string): WindowOpts {
     }
     if (/^[<>cv^\s]+$/i.test(inner)) {
       align = splitImageAlign(`x ${inner}`).align;
-    } else if (/^pad$/i.test(inner) || /\bp(?:ad(?:ding)?)?\s*=/i.test(inner)) {
-      const m = /=\s*(\d{1,3})/.exec(inner);
-      padding = m ? Number(m[1]) : 14;
+    } else if (/^noscroll$/i.test(inner)) {
+      noscroll = true;
+    } else if (/\bdevice\s*=/i.test(inner)) {
+      const m = /=\s*(\d{2,4})/.exec(inner);
+      device = m ? Number(m[1]) : null;
+    } else if (/\b(?:pad|px|py)\s*=/i.test(inner)) {
+      readPad(inner);
+    } else if (!sizeSeen) {
+      readSize(inner);
+      sizeSeen = true;
     } else {
-      const size = parseImageSize(inner);
-      if (size.width !== null) {
-        width = size.width;
-      }
-      if (size.height !== null) {
-        height = size.height;
-      }
+      readPad(inner);
     }
   }
-  return { width, height, align, padding };
+  return { width, widthAuto, height, padX, padY, align, noscroll, device };
 }
 
 /**
@@ -1151,90 +1217,49 @@ function parseWindowParams(param: string): WindowOpts {
  * render into — one box model, so the three stay pixel-identical. It floats and
  * pushes surrounding text aside using the same <>c^v pins as images. Width
  * defaults to 300px; padding defaults to none so an image can fill it edge to edge.
+ * `widthAuto` makes it a full-column-width block instead of a fixed float.
  */
 function Window({
   align,
+  widthAuto = false,
   width = 300,
   height = null,
-  padding = null,
+  padX = 0,
+  padY = 0,
   className,
   children,
 }: {
   align: ImageAlign;
+  widthAuto?: boolean;
   width?: number | "max" | null;
   height?: number | null;
-  padding?: number | null;
+  padX?: number;
+  padY?: number;
   className?: string;
   children: React.ReactNode;
 }) {
-  const cls = ["window", align.set ? alignClasses(align) : "", className].filter(Boolean).join(" ");
+  const cls = ["window", widthAuto ? "wfull" : "", align.set ? alignClasses(align) : "", className]
+    .filter(Boolean)
+    .join(" ");
   const style: React.CSSProperties = {};
-  if (width === "max") {
+  if (widthAuto || width === "max") {
     style.width = "100%";
   } else if (typeof width === "number") {
     style.width = width;
+  } else {
+    style.width = 300;
   }
   if (typeof height === "number") {
     style.height = height;
   }
-  if (typeof padding === "number") {
-    style.padding = padding;
+  if (padX || padY) {
+    style.padding = `${padY}px ${padX}px`;
   }
   return (
     <div className={cls} style={style}>
       {children}
     </div>
   );
-}
-
-interface HtmlOpts {
-  width: number | null;
-  height: number | null;
-  noscroll: boolean;
-  device: number | null;
-  /** Break out of the wiki column to fill the whole content area. */
-  full: boolean;
-}
-
-/**
- * Parses the options after `:::html`, in the same parenthesised style as :::window:
- *   (w=300 h=300)      — fixed box; content scrolls inside if larger
- *   (w=300 h=300)(noscroll) — fixed box; the whole document is scaled to fit
- *   (w=320 h=640)(device=390) — render at a 390px phone width, scaled into the box
- *   (auto)             — full-bleed: fill the whole content area, not just the column
- *   (auto)(w=24 h=12)  — full-bleed with 24px side padding and 12px top/bottom padding
- * `w`/`h` accept the same `w=`/`h=` tokens as image sizes; `w=max` means fill. When
- * `auto` is present, `w`/`h` become horizontal/vertical padding instead of a size.
- */
-function parseHtmlParams(param: string): HtmlOpts {
-  let width: number | null = null;
-  let height: number | null = null;
-  let noscroll = false;
-  let device: number | null = null;
-  let full = false;
-  for (const group of param.match(/\(([^)]*)\)/g) ?? []) {
-    const inner = group.slice(1, -1).trim();
-    if (!inner) {
-      continue;
-    }
-    if (/^auto$/i.test(inner)) {
-      full = true;
-    } else if (/^noscroll$/i.test(inner)) {
-      noscroll = true;
-    } else if (/\bdevice\s*=/i.test(inner)) {
-      const m = /=\s*(\d{2,4})/.exec(inner);
-      device = m ? Number(m[1]) : null;
-    } else {
-      const size = parseImageSize(inner);
-      if (size.width !== null) {
-        width = size.width === "max" ? null : size.width;
-      }
-      if (size.height !== null) {
-        height = size.height;
-      }
-    }
-  }
-  return { width, height, noscroll, device, full };
 }
 
 function Heading({
@@ -1440,9 +1465,17 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
     // any markdown goes inside — and its size/pin/padding are set explicitly:
     // `:::window(w=300)(>)`. It's the backend :::infobox and :::contentsmini use.
     case "window": {
-      const opts = parseWindowParams(dir.param);
+      const b = parseBoxParams(dir.param);
       return (
-        <Window key={k()} align={opts.align} width={opts.width ?? 300} height={opts.height} padding={opts.padding}>
+        <Window
+          key={k()}
+          align={b.align}
+          widthAuto={b.widthAuto}
+          width={b.width}
+          height={b.height}
+          padX={b.padX}
+          padY={b.padY}
+        >
           {renderMarkdown(body.join("\n"), ctx)}
         </Window>
       );
@@ -1450,16 +1483,19 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
     // Raw HTML rendered in a sandboxed, origin-isolated iframe — scripts run but
     // can't reach the wiki, cookies or the viewer's session. Body is verbatim.
     case "html": {
-      const opts = parseHtmlParams(dir.param);
+      const b = parseBoxParams(dir.param);
       return (
         <HtmlEmbed
           key={k()}
           html={body.join("\n")}
-          width={opts.width}
-          height={opts.height}
-          noscroll={opts.noscroll}
-          device={opts.device}
-          full={opts.full}
+          full={b.widthAuto}
+          width={b.width === "max" ? null : b.width}
+          height={b.height}
+          padX={b.padX}
+          padY={b.padY}
+          align={b.align.set ? b.align.h : undefined}
+          noscroll={b.noscroll}
+          device={b.device}
           editing={ctx.editing}
         />
       );
@@ -1474,16 +1510,20 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
       if (url && !/^https?:\/\//i.test(url)) {
         url = "https://" + url;
       }
-      const opts = parseHtmlParams(groups.slice(1).join(""));
+      // The URL is the first group; the rest follow the shared box grammar.
+      const b = parseBoxParams(groups.slice(1).join(""));
       return (
         <HtmlEmbed
           key={k()}
           src={url}
-          width={opts.width}
-          height={opts.height}
-          noscroll={opts.noscroll}
-          device={opts.device}
-          full={opts.full}
+          full={b.widthAuto}
+          width={b.width === "max" ? null : b.width}
+          height={b.height}
+          padX={b.padX}
+          padY={b.padY}
+          align={b.align.set ? b.align.h : undefined}
+          noscroll={b.noscroll}
+          device={b.device}
           editing={ctx.editing}
         />
       );
