@@ -426,6 +426,27 @@
 .wiki .window .html-embed {
   margin: 0;
 }
+/*
+ * Full-bleed (:::html(auto)) — escape the centred column and fill the content
+ * area. `--fb-inset` is the left sidebar's width so the break-out stops at the
+ * sidebar edge rather than sliding under it; it's 0 on narrow screens where the
+ * sidebar is hidden. The calc is the standard viewport break-out, offset by the
+ * inset so the box spans (viewport − sidebar).
+ */
+.wiki {
+  --fb-inset: 0px;
+}
+@media (min-width: 768px) {
+  .wiki {
+    --fb-inset: 264px;
+  }
+}
+.wiki .html-embed.full {
+  width: calc(100vw - var(--fb-inset));
+  max-width: none;
+  margin-left: calc((100% + var(--fb-inset) - 100vw) / 2);
+  margin-right: calc((100% + var(--fb-inset) - 100vw) / 2);
+}
 .wiki .html-embed-frame {
   display: block;
   width: 100%;

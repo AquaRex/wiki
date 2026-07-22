@@ -10,6 +10,9 @@ export interface HtmlEmbedProps {
   noscroll: boolean;
   /** Logical "device" width to render at, then scale into the box (phone preview). */
   device: number | null;
+  /** Break out of the wiki column to fill the whole content area. In this mode
+   *  `width`/`height` are read as horizontal/vertical padding, not a size. */
+  full: boolean;
   /** In the editor's live preview we don't auto-run — a heavy script would restart
    *  on every keystroke — so we show a click-to-run placeholder instead. */
   editing?: boolean;
@@ -44,7 +47,7 @@ function withReporter(html: string): string {
   return html + SIZE_REPORTER;
 }
 
-export function HtmlEmbed({ html, width, height, noscroll, device, editing }: HtmlEmbedProps) {
+export function HtmlEmbed({ html, width, height, noscroll, device, full, editing }: HtmlEmbedProps) {
   const [run, setRun] = useState(!editing);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [content, setContent] = useState({ w: 0, h: 0 });
@@ -84,6 +87,25 @@ export function HtmlEmbed({ html, width, height, noscroll, device, editing }: Ht
 
   const srcDoc = withReporter(html);
   const scaled = noscroll || device != null;
+
+  // Full-bleed: break out of the wiki column (CSS handles the width/offset) and
+  // fill the content area. width/height are re-read as side / top-bottom padding.
+  if (full) {
+    const padX = width != null ? width : 0;
+    const padY = height != null ? height : 0;
+    return (
+      <div className="html-embed full" style={{ padding: `${padY}px ${padX}px` }}>
+        <iframe
+          ref={frameRef}
+          className="html-embed-frame"
+          title="Embedded HTML"
+          sandbox="allow-scripts"
+          srcDoc={srcDoc}
+          style={{ width: "100%", height: content.h ? content.h : 480 }}
+        />
+      </div>
+    );
+  }
 
   // Phone-style preview: render at a logical device width and scale that to fit
   // the box width. The frame keeps a real viewport, so the page lays out

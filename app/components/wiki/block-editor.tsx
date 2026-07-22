@@ -554,6 +554,17 @@ function BlockEditorPanel({
   if (hasBlueprint(draft)) {
     return (
       <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <span className="font-mono text-[10.5px] uppercase tracking-wider text-text-faint">Editing block</span>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="xs" onClick={onClose} disabled={busy}>
+              <X className="size-3" /> Cancel
+            </Button>
+            <Button size="xs" onClick={save} disabled={busy}>
+              <Check className="size-3" /> {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
         <SegmentedEditor draft={draft} onChange={setDraft} onSave={save} onCancel={onClose} />
         <div className="wiki border-t border-border px-5 pb-4 pt-3">
           <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-faint">Preview</div>
@@ -579,6 +590,17 @@ function BlockEditorPanel({
 
   return (
     <div className="my-4 rounded-lg border border-accent-line bg-surface shadow-lg">
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <span className="font-mono text-[10.5px] uppercase tracking-wider text-text-faint">Editing block</span>
+        <div className="flex gap-2">
+          <Button variant="ghost" size="xs" onClick={onClose} disabled={busy}>
+            <X className="size-3" /> Cancel
+          </Button>
+          <Button size="xs" onClick={save} disabled={busy}>
+            <Check className="size-3" /> {busy ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
       <div className="border-b border-border bg-surface-2 px-2 py-1.5">
         <div className="flex flex-wrap items-center gap-1">
           {SNIPPETS.filter((s) => s.core).map((snippet) => (

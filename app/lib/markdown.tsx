@@ -1192,6 +1192,8 @@ interface HtmlOpts {
   height: number | null;
   noscroll: boolean;
   device: number | null;
+  /** Break out of the wiki column to fill the whole content area. */
+  full: boolean;
 }
 
 /**
@@ -1199,19 +1201,25 @@ interface HtmlOpts {
  *   (w=300 h=300)      — fixed box; content scrolls inside if larger
  *   (w=300 h=300)(noscroll) — fixed box; the whole document is scaled to fit
  *   (w=320 h=640)(device=390) — render at a 390px phone width, scaled into the box
- * `w`/`h` accept the same `w=`/`h=` tokens as image sizes; `w=max` means fill.
+ *   (auto)             — full-bleed: fill the whole content area, not just the column
+ *   (auto)(w=24 h=12)  — full-bleed with 24px side padding and 12px top/bottom padding
+ * `w`/`h` accept the same `w=`/`h=` tokens as image sizes; `w=max` means fill. When
+ * `auto` is present, `w`/`h` become horizontal/vertical padding instead of a size.
  */
 function parseHtmlParams(param: string): HtmlOpts {
   let width: number | null = null;
   let height: number | null = null;
   let noscroll = false;
   let device: number | null = null;
+  let full = false;
   for (const group of param.match(/\(([^)]*)\)/g) ?? []) {
     const inner = group.slice(1, -1).trim();
     if (!inner) {
       continue;
     }
-    if (/^noscroll$/i.test(inner)) {
+    if (/^auto$/i.test(inner)) {
+      full = true;
+    } else if (/^noscroll$/i.test(inner)) {
       noscroll = true;
     } else if (/\bdevice\s*=/i.test(inner)) {
       const m = /=\s*(\d{2,4})/.exec(inner);
@@ -1226,7 +1234,7 @@ function parseHtmlParams(param: string): HtmlOpts {
       }
     }
   }
-  return { width, height, noscroll, device };
+  return { width, height, noscroll, device, full };
 }
 
 function Heading({
@@ -1451,6 +1459,7 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
           height={opts.height}
           noscroll={opts.noscroll}
           device={opts.device}
+          full={opts.full}
           editing={ctx.editing}
         />
       );
