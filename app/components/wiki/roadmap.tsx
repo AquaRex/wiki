@@ -50,7 +50,21 @@ class BoardBoundary extends React.Component<{ children: React.ReactNode }, { fai
   }
 }
 
-export function Roadmap(props: { pagePath: string; boardKey: string; ctx: RenderContext }) {
+interface BoardProps {
+  pagePath: string;
+  boardKey: string;
+  ctx: RenderContext;
+  /** Break out of the wiki column and fill the content area. */
+  full?: boolean;
+  /** A fixed board width in px; null keeps the column width. */
+  width?: number | null;
+  /** A fixed board height in px; null keeps the default tall-but-capped box. */
+  height?: number | null;
+  /** Where a fixed-width board sits in the column. */
+  align?: "left" | "center" | "right";
+}
+
+export function Roadmap(props: BoardProps) {
   return (
     <BoardBoundary>
       <RoadmapBoard {...props} />
@@ -63,7 +77,7 @@ type DragState =
   | { kind: "column"; colId: string }
   | null;
 
-function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey: string; ctx: RenderContext }) {
+function RoadmapBoard({ pagePath, boardKey, ctx, full, width, height, align }: BoardProps) {
   const { editUnlocked, email } = useAuth();
   const me = useMemo(() => (email ? email.split("@")[0] : "someone"), [email]);
   const [board, setBoard] = useState<BoardData | null>(null);
@@ -248,8 +262,31 @@ function RoadmapBoard({ pagePath, boardKey, ctx }: { pagePath: string; boardKey:
   const openCol = openCard && board.columns.find((c) => c.id === openCard.colId);
   const openData = openCol?.cards.find((cd) => cd.id === openCard!.cardId);
 
+  // A given height replaces the default min/max box entirely — otherwise the
+  // 80vh cap would quietly win over a taller board.
+  const boxStyle: React.CSSProperties = {};
+  if (height != null) {
+    boxStyle.height = height;
+    boxStyle.minHeight = 0;
+    boxStyle.maxHeight = "none";
+    // Minus the board's 12px padding top and bottom.
+    (boxStyle as Record<string, string>)["--rm-cols-min"] = `${Math.max(120, height - 24)}px`;
+  }
+  if (!full && width != null) {
+    boxStyle.width = width;
+    boxStyle.maxWidth = "100%";
+  }
+  const boxClass = [
+    "roadmap",
+    full ? "full" : "",
+    !full && width != null && align && align !== "left" ? `h-${align}` : "",
+    openCard || confirmAsk ? "roadmap-has-overlay" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div ref={rootRef} className={`roadmap${openCard || confirmAsk ? " roadmap-has-overlay" : ""}`}>
+    <div ref={rootRef} className={boxClass} style={boxStyle}>
       <div className="roadmap-cols">
         {board.columns.map((col) => (
           <div

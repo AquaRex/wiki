@@ -4,9 +4,11 @@ import { Check, ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, Globe,
 import { getStore, type AccessScope } from "~/lib/store";
 import { GrantList } from "./grant-list";
 import {
+  inheritedFolderAccess,
   lastSegment,
   normalizeSegment,
   parentOfRel,
+  strictestAccess,
   stripProjectPrefix,
   type AccessLevel,
   type PageMove,
@@ -105,7 +107,7 @@ function finalizeMeta(next: ProjectMeta, pageRels: string[]): ProjectMeta {
   };
   walk(root.children);
 
-  return { order, private: next.private, folders };
+  return { order, private: next.private, folders, folderAccess: next.folderAccess };
 }
 
 function buildTree(pages: PageSummary[], project: string, meta: ProjectMeta) {
@@ -152,6 +154,13 @@ function buildTree(pages: PageSummary[], project: string, meta: ProjectMeta) {
   return { tree: root.children, byRel };
 }
 
+/** What restricts an item, and whether it was set here or inherited. */
+interface AccessMark {
+  level: AccessLevel;
+  /** The folder the restriction came from; empty when the item sets it itself. */
+  from: string;
+}
+
 function TreeItem({
   node,
   depth,
@@ -159,6 +168,8 @@ function TreeItem({
   draggable,
   drag,
   over,
+  mark,
+  markOf,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -172,6 +183,8 @@ function TreeItem({
   draggable: boolean;
   drag: DragState | null;
   over: OverState | null;
+  mark: AccessMark | null;
+  markOf: (node: TreeNode) => AccessMark | null;
   onDragStart: (node: TreeNode) => void;
   onDragEnd: () => void;
   onDragOver: (node: TreeNode, e: React.DragEvent) => void;
@@ -201,9 +214,10 @@ function TreeItem({
           ? "ring-1 ring-accent-line bg-accent-soft"
           : "";
 
-  // The icon reflects the page's REAL access: a lock only for a password-locked
-  // page, an eye-off for a hidden one. The old meta "lock" no longer shows here.
-  const access = node.page?.access ?? "public";
+  // A lock for a password-locked item, an eye-off for a hidden one. The icon is
+  // solid when the item itself carries the restriction and faint when it only
+  // inherits it, so the index shows WHERE a restriction comes from.
+  const AccessIcon = mark?.level === "hidden" ? EyeOff : Lock;
   const label = (
     <span className="flex min-w-0 items-center gap-1.5">
       {isFolder ? (
@@ -216,8 +230,14 @@ function TreeItem({
         <FileText className="size-3.5 shrink-0 text-text-faint" />
       )}
       <span className="truncate">{node.page ? node.page.title : node.name}</span>
-      {access === "locked" && <Lock className="size-3 shrink-0 text-waccent" />}
-      {access === "hidden" && <EyeOff className="size-3 shrink-0 text-waccent" />}
+      {mark && (
+        <span
+          className="flex shrink-0 items-center"
+          title={mark.from ? `${mark.level} — inherited from ${mark.from}` : `${mark.level} — set on this item`}
+        >
+          <AccessIcon className={`size-3 ${mark.from ? "text-text-faint opacity-70" : "text-waccent"}`} />
+        </span>
+      )}
     </span>
   );
 
@@ -294,6 +314,8 @@ function TreeItem({
               draggable={draggable}
               drag={drag}
               over={over}
+              mark={markOf(child)}
+              markOf={markOf}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onDragOver={onDragOver}
@@ -341,6 +363,23 @@ export function PageTree({
   const { tree, byRel } = useMemo(() => buildTree(pages, project, local), [pages, project, local]);
 
   const childrenOf = (rel: string) => (rel === "" ? tree : (byRel.get(rel)?.children ?? []));
+
+  /**
+   * What restricts a row, and whether it was set on the row itself. A page
+   * carries its effective level already (the database resolves it), so the only
+   * thing to work out is whether the folders above it are the reason.
+   */
+  const markOf = (node: TreeNode): AccessMark | null => {
+    const own = node.page ? node.page.ownAccess : (local.folderAccess[node.rel] ?? "public");
+    const inherited = inheritedFolderAccess(local.folderAccess, node.rel);
+    const level = strictestAccess(own, node.page ? node.page.access : (inherited?.level ?? "public"));
+    if (level === "public") {
+      return null;
+    }
+    // Set here wins the explanation: an item that is itself hidden is not
+    // "hidden by its folder", even when the folder is hidden too.
+    return { level, from: own === "public" ? (inherited?.from ?? "") : "" };
+  };
 
   // A folder can't be dropped into itself or its own subtree.
   const isValidTarget = (target: TreeNode, pos: DropPosition): boolean => {
@@ -446,6 +485,9 @@ export function PageTree({
         order: nextOrder,
         private: local.private.map(relAfter),
         folders: local.folders.map(relAfter),
+        folderAccess: Object.fromEntries(
+          Object.entries(local.folderAccess).map(([rel, level]) => [relAfter(rel), level])
+        ),
       },
       pages.map((p) => relAfter(stripProjectPrefix(p.path)))
     );
@@ -501,6 +543,9 @@ export function PageTree({
         order: nextOrder,
         private: local.private.map(relAfter),
         folders: local.folders.map(relAfter),
+        folderAccess: Object.fromEntries(
+          Object.entries(local.folderAccess).map(([rel, level]) => [relAfter(rel), level])
+        ),
       },
       pages.map((p) => relAfter(stripProjectPrefix(p.path)))
     );
@@ -552,6 +597,9 @@ export function PageTree({
         order: Object.fromEntries(Object.entries(local.order).filter(([rel]) => !covered(rel))),
         private: local.private.filter((rel) => !covered(rel)),
         folders: local.folders.filter((rel) => !covered(rel)),
+        folderAccess: Object.fromEntries(
+          Object.entries(local.folderAccess).filter(([rel]) => !covered(rel))
+        ),
       },
       pages.filter((p) => !doomed.includes(p)).map((p) => stripProjectPrefix(p.path))
     );
@@ -726,6 +774,8 @@ export function PageTree({
           draggable={editUnlocked}
           drag={drag}
           over={over}
+          mark={markOf(node)}
+          markOf={markOf}
           onDragStart={(n) => setDrag({ rel: n.rel, isFolder: isFolderNode(n) })}
           onDragEnd={reset}
           onDragOver={handleDragOver}

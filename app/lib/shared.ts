@@ -20,8 +20,12 @@ export interface WikiPage {
   tags: string[];
   blocks: WikiBlock[];
   updated: string;
-  /** The page's own access level (before project inheritance). */
+  /** The access level in force here — the strictest of this page and everything
+   *  above it (its folders and its project). */
   access: AccessLevel;
+  /** The level set on the page itself. Differs from `access` when a folder or
+   *  the project is what restricts it. */
+  ownAccess: AccessLevel;
   /**
    * True when this page is effectively locked and its body was withheld by the
    * server — header/lede/blocks are blank until unlockPage() succeeds.
@@ -32,8 +36,18 @@ export interface WikiPage {
 export interface PageSummary {
   path: string;
   title: string;
-  /** The page's own access level, for showing the right icon in the index. */
+  /** The level in force — inherited from a folder or project if stricter. */
   access: AccessLevel;
+  /** The level set on the page itself, so the index can tell the two apart. */
+  ownAccess: AccessLevel;
+}
+
+/** hidden beats locked beats public — the order access inherits by. */
+export function strictestAccess(a: AccessLevel, b: AccessLevel): AccessLevel {
+  if (a === "hidden" || b === "hidden") {
+    return "hidden";
+  }
+  return a === "locked" || b === "locked" ? "locked" : "public";
 }
 
 /** A page summary with the fields the search page lists. */
@@ -284,15 +298,39 @@ export interface SearchResult {
  *           the RLS policy stays a plain boolean check.
  * folders — folders created explicitly. Most folders are implicit (derived from
  *           page paths), but an empty one has no page to derive it from.
+ * folderAccess — each folder's own access level, keyed by rel. Only folders that
+ *           restrict something appear; everything else is public.
  */
 export interface ProjectMeta {
   order: Record<string, number>;
   private: string[];
   folders: string[];
+  folderAccess: Record<string, AccessLevel>;
 }
 
 export function emptyProjectMeta(): ProjectMeta {
-  return { order: {}, private: [], folders: [] };
+  return { order: {}, private: [], folders: [], folderAccess: {} };
+}
+
+/**
+ * The strictest access inherited from the folders ABOVE `rel`, and which folder
+ * imposed it — what the index needs to say "hidden because Systems is".
+ */
+export function inheritedFolderAccess(
+  folderAccess: Record<string, AccessLevel>,
+  rel: string
+): { level: AccessLevel; from: string } | null {
+  let found: { level: AccessLevel; from: string } | null = null;
+  const target = rel.toLowerCase();
+  for (const [folder, level] of Object.entries(folderAccess)) {
+    if (level === "public" || !target.startsWith(folder.toLowerCase() + "/")) {
+      continue;
+    }
+    if (!found || strictestAccess(found.level, level) !== found.level) {
+      found = { level, from: folder };
+    }
+  }
+  return found;
 }
 
 /**
@@ -457,6 +495,7 @@ export function blankPage(rawPath: string, title?: string): WikiPage {
     blocks: [{ id: newBlockId(), text: "Write something…" }],
     updated: "",
     access: "public",
+    ownAccess: "public",
     locked: false,
   };
 }

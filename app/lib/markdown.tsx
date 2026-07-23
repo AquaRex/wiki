@@ -1522,11 +1522,32 @@ function renderDirective(dir: DirectiveLines, ctx: RenderContext): React.ReactNo
       // into the editor. UnrealGraph only reads it to draw.
       return <UnrealGraph key={k()} source={body.join("\n")} />;
     }
-    // A Trello-style board. `dir.param` is an optional board key so one page can
-    // hold several boards; the board's data lives in its own table row, keyed by
-    // page + key, loaded after the page (RLS withholds a private page's board).
+    /*
+     * A Trello-style board. The param is an optional board key — so one page can
+     * hold several boards — followed by the same box grammar as :::window:
+     *
+     *   :::roadmap                 default box (tall, scrolls inside)
+     *   :::roadmap(auto)           full width of the page
+     *   :::roadmap(auto h=900)     full width, 900 tall
+     *   :::roadmap plans(w=700)    a named board, 700 wide
+     *
+     * The board's data lives in its own table row, keyed by page + key, loaded
+     * after the page (RLS withholds a restricted page's board).
+     */
     case "roadmap": {
-      return <Roadmap key={k()} pagePath={ctx.currentPath} boardKey={dir.param} ctx={ctx} />;
+      const b = parseBoxParams(dir.param);
+      return (
+        <Roadmap
+          key={k()}
+          pagePath={ctx.currentPath}
+          boardKey={dir.param.replace(/\([^)]*\)/g, "").trim()}
+          ctx={ctx}
+          full={b.widthAuto || b.width === "max"}
+          width={b.width === "max" ? null : b.width}
+          height={b.height}
+          align={b.align.set ? b.align.h : undefined}
+        />
+      );
     }
     // A spreadsheet grid. `dir.param` is an optional sheet key so one page can
     // hold several sheets; the sheet's data lives in its own table row, keyed by

@@ -115,6 +115,7 @@ interface PageRow {
   tags: string[];
   blocks: { id: string; text: string }[];
   access: AccessLevel;
+  own_access: AccessLevel;
   is_locked: boolean;
   sort_order: number;
   updated_at: string;
@@ -131,6 +132,7 @@ function rowToPage(row: PageRow): WikiPage {
     blocks: row.blocks ?? [],
     updated: row.updated_at ?? "",
     access: row.access ?? "public",
+    ownAccess: row.own_access ?? row.access ?? "public",
     locked: Boolean(row.is_locked),
   };
 }
@@ -189,7 +191,7 @@ class SupabaseStore implements WikiStore {
   async listPages() {
     const pages = await this.pages();
     return Array.from(pages.values())
-      .map((p) => ({ path: p.path, title: p.title, access: p.access }))
+      .map((p) => ({ path: p.path, title: p.title, access: p.access, ownAccess: p.ownAccess }))
       .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
   }
 
@@ -197,7 +199,14 @@ class SupabaseStore implements WikiStore {
   async listPageCards(): Promise<PageCard[]> {
     const pages = await this.pages();
     return Array.from(pages.values())
-      .map((p) => ({ path: p.path, title: p.title, access: p.access, lede: p.lede, tags: p.tags }))
+      .map((p) => ({
+        path: p.path,
+        title: p.title,
+        access: p.access,
+        ownAccess: p.ownAccess,
+        lede: p.lede,
+        tags: p.tags,
+      }))
       .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
   }
 
@@ -299,7 +308,7 @@ class SupabaseStore implements WikiStore {
     }
     const [pages, folders] = await Promise.all([
       supabase.from("pages").select("rel,is_private,sort_order").eq("project_slug", project),
-      supabase.from("folders").select("rel,is_private,sort_order").eq("project_slug", project),
+      supabase.from("folders").select("rel,is_private,sort_order,access").eq("project_slug", project),
     ]);
     fail("Could not load the project index", pages.error ?? folders.error);
 
@@ -311,6 +320,11 @@ class SupabaseStore implements WikiStore {
       }
     }
     meta.folders = (folders.data ?? []).map((f) => f.rel);
+    for (const folder of (folders.data ?? []) as { rel: string; access?: AccessLevel }[]) {
+      if (folder.access && folder.access !== "public") {
+        meta.folderAccess[folder.rel] = folder.access;
+      }
+    }
     return meta;
   }
 

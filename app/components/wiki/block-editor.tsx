@@ -179,6 +179,7 @@ const SNIPPETS: Snippet[] = [
   { label: "HTML embed", icon: <Code2 className="size-3.5" />, text: ":::html\n<!doctype html>\n<html><body style=\"font:14px sans-serif;color:#e6edf3;background:#161b22;padding:16px\">\n  <h2>Hello from a sandboxed page</h2>\n  <p>Paste a self-contained HTML document here — styles and scripts run isolated.</p>\n</body></html>\n:::", block: true, wrap: [":::html\n", "\n:::"] },
   { label: "Site embed", icon: <AppWindow className="size-3.5" />, text: ":::embed(https://example.com)(h=600)\n:::", block: true },
   { label: "Roadmap", icon: <KanbanSquare className="size-3.5" />, text: ":::roadmap\n:::", block: true },
+  { label: "Roadmap wide", icon: <KanbanSquare className="size-3.5" />, text: ":::roadmap(auto h=900)\n:::", block: true },
   { label: "Cells", icon: <Table className="size-3.5" />, text: ":::cells\n:::", block: true },
   { label: "Blueprint", icon: <GitBranch className="size-3.5" />, text: ":::blueprint\nPaste copied Unreal Blueprint nodes here.\n:::", block: true, wrap: [":::blueprint\n", "\n:::"] },
   { label: "Material", icon: <GitBranch className="size-3.5" />, text: ":::material\nPaste copied Unreal Material nodes here.\n:::", block: true, wrap: [":::material\n", "\n:::"] },
@@ -413,6 +414,7 @@ function BlockEditorPanel({
       blocks: [{ id: block.id, text: draft }],
       updated: "",
       access: "public",
+      ownAccess: "public",
       locked: false,
     };
     // Resolve the draft's own defs for this page so a local def and its reference

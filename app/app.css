@@ -450,11 +450,17 @@
     --fb-inset: 264px;
   }
 }
-.wiki .html-embed.full {
+.wiki .html-embed.full,
+.wiki .roadmap.full {
   width: calc(100vw - var(--fb-inset));
   max-width: none;
   margin-left: calc((100% + var(--fb-inset) - 100vw) / 2);
   margin-right: calc((100% + var(--fb-inset) - 100vw) / 2);
+}
+/* A full-bleed board still needs breathing room at the viewport edges. */
+.wiki .roadmap.full {
+  padding-left: 24px;
+  padding-right: 24px;
 }
 .wiki .html-embed-frame {
   display: block;
@@ -1685,6 +1691,15 @@ button.tag:hover {
   overflow: auto;
   overscroll-behavior: contain;
 }
+/* Placement of a fixed-width board within the column, as :::html does it. */
+.wiki .roadmap.h-center {
+  margin-left: auto;
+  margin-right: auto;
+}
+.wiki .roadmap.h-right {
+  margin-left: auto;
+  margin-right: 0;
+}
 .wiki .roadmap-empty {
   color: var(--text-faint);
   font-family: var(--font-mono);
@@ -1697,7 +1712,9 @@ button.tag:hover {
   /* Stretch so every column fills the board height — its drop zone then reaches
      the bottom, so releasing a card in the empty space under a column adds it. */
   align-items: stretch;
-  min-height: 396px;
+  /* Follows an explicit board height so the columns — and therefore their drop
+     zones — still reach the bottom of a taller board. */
+  min-height: var(--rm-cols-min, 396px);
 }
 .wiki .roadmap-col {
   flex: 0 0 260px;
