@@ -495,6 +495,56 @@ export function resolveVariablesForPage(
   return out;
 }
 
+/**
+ * One `global:` definition token lifted straight out of a page by the
+ * `global_defs` view — the only part of a hidden or locked page that is
+ * readable, so project-wide vocabulary keeps working wherever it is defined.
+ * The defining page is deliberately not identified.
+ */
+export interface GlobalDefRow {
+  project_slug: string;
+  token: string;
+}
+
+export interface GlobalDefs {
+  variables: VariableDef[];
+  terms: RawTermDef[];
+}
+
+/**
+ * Parses `global_defs` rows into the same def shapes the page scan produces,
+ * grouped by lowercased project slug. `page` is empty on every one of them:
+ * these defs carry no location, so they render as a definition with nothing to
+ * click through to. A def whose page IS visible arrives through the normal page
+ * scan as well, and that copy — which does link — wins during resolution.
+ */
+export function parseGlobalDefRows(rows: GlobalDefRow[]): Record<string, GlobalDefs> {
+  const out: Record<string, GlobalDefs> = {};
+  for (const row of rows) {
+    const group = (out[row.project_slug.toLowerCase()] ??= { variables: [], terms: [] });
+    for (const match of row.token.matchAll(DEF_RE)) {
+      group.variables.push({
+        name: match[2],
+        value: match[3] ?? "",
+        description: match[4] ?? "",
+        page: "",
+        blockId: "",
+        scope: "global",
+      });
+    }
+    for (const match of row.token.matchAll(TYPEDEF_RE)) {
+      group.terms.push({
+        name: match[2],
+        explanation: (match[3] ?? "").trim(),
+        page: "",
+        blockId: "",
+        scope: "global",
+      });
+    }
+  }
+  return out;
+}
+
 /** Back-compat: the plain global-only map keyed by name (no page resolution). */
 export function extractVariables(pages: WikiPage[]): Record<string, VariableDef> {
   return resolveVariablesForPage(collectVariableDefs(pages), "");
@@ -550,11 +600,14 @@ function mergeTerms(defs: RawTermDef[]): Record<string, TermDef> {
       terms[def.name] = { name: def.name, explanation: def.explanation, page: def.page, blockId: def.blockId, scope: def.scope };
       continue;
     }
+    // A def with no page came from global_defs — it can never win the anchor,
+    // and it must never keep a real one out.
+    const anchorHere = Boolean(isBare && def.page) || !existing.page;
     terms[def.name] = {
       name: def.name,
       explanation: def.explanation || existing.explanation,
-      page: isBare ? def.page : existing.page,
-      blockId: isBare ? def.blockId : existing.blockId,
+      page: anchorHere ? def.page : existing.page,
+      blockId: anchorHere ? def.blockId : existing.blockId,
       scope: def.scope,
     };
   }

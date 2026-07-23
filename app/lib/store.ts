@@ -11,7 +11,10 @@ import {
   extractVariables,
   isRelLocked,
   normalizePath,
+  parseGlobalDefRows,
   projectOf,
+  type GlobalDefRow,
+  type GlobalDefs,
   rewriteLinksInPage,
   searchInPages,
   stripProjectPrefix,
@@ -47,6 +50,11 @@ export interface WikiStore {
   /** Raw def lists (globals and locals) for per-page scope resolution. */
   getVariableDefs(): Promise<VariableDef[]>;
   getTermDefs(): Promise<RawTermDef[]>;
+  /**
+   * Global defs from every page — including the hidden and locked ones whose
+   * bodies this viewer never receives — keyed by lowercased project slug.
+   */
+  getGlobalDefs(): Promise<Record<string, GlobalDefs>>;
   /** A :::roadmap board's saved data, or null if it has never been saved. */
   getBoard(pagePath: string, boardKey: string): Promise<BoardData | null>;
   /** Saves a roadmap board (signed-in only, refused on a locked/withheld page). */
@@ -142,6 +150,7 @@ function fail(context: string, error: { message: string } | null): void {
 class SupabaseStore implements WikiStore {
   private pagesCache: Map<string, WikiPage> | null = null;
   private loading: Promise<Map<string, WikiPage>> | null = null;
+  private globalDefs: Promise<Record<string, GlobalDefs>> | null = null;
 
   /**
    * Pages are cached because search and the variables index need every page,
@@ -219,6 +228,9 @@ class SupabaseStore implements WikiStore {
       .eq("rel", rel);
     fail(`Could not save ${page.path}`, error);
     (await this.pages()).set(page.path.toLowerCase(), { ...page, updated });
+    // An edit may have added or changed a global def; the page cache is patched
+    // in place above, but the view has to be read again.
+    this.globalDefs = null;
   }
 
   async createPage(rawPath: string, title?: string) {
@@ -447,6 +459,26 @@ class SupabaseStore implements WikiStore {
   async getTermDefs() {
     const pages = await this.pages();
     return collectTermDefs(Array.from(pages.values()));
+  }
+
+  /**
+   * The project-wide vocabulary, read from a view that exposes only `global:`
+   * definition tokens. It deliberately sees past the page RLS: a global defined
+   * on a hidden or locked page must still resolve everywhere else in the
+   * project, and a bare token says nothing about the page it came from.
+   */
+  async getGlobalDefs() {
+    if (!this.globalDefs) {
+      this.globalDefs = (async () => {
+        const { data, error } = await supabase.from("global_defs").select("project_slug,token");
+        fail("Could not read global_defs — run supabase/schema.sql in the SQL editor", error);
+        return parseGlobalDefRows((data ?? []) as GlobalDefRow[]);
+      })();
+      this.globalDefs.catch(() => {
+        this.globalDefs = null;
+      });
+    }
+    return this.globalDefs;
   }
 
   async getBoard(pagePath: string, boardKey: string): Promise<BoardData | null> {
@@ -691,6 +723,7 @@ class SupabaseStore implements WikiStore {
   invalidate() {
     this.pagesCache = null;
     this.loading = null;
+    this.globalDefs = null;
   }
 }
 

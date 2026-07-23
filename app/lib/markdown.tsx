@@ -582,6 +582,15 @@ function Chip({
   );
 }
 
+/**
+ * Where a definition's chip links to — nothing when the def has no page. That
+ * happens for a global lifted out of a hidden or locked page: the definition is
+ * shared project-wide, but there is no page this viewer could be sent to.
+ */
+function defHref(page: string, hash: string): string | undefined {
+  return page ? `/${page}${hash}` : undefined;
+}
+
 /** The hover card markup for a variable: name = value — description. */
 function variableCard(def: RenderVariable): string {
   return `**${def.name}**${def.value ? ` = :white[${def.value}]` : ""}${def.description ? ` — ${def.description}` : ""}`;
@@ -601,7 +610,7 @@ function variableLink(ctx: RenderContext, name: string, label: React.ReactNode):
       variant="varref"
       label={label}
       description={variableCard(def)}
-      to={`/${def.page}#var-${name}`}
+      to={defHref(def.page, `#var-${name}`)}
       preventScrollReset={samePage}
     />
   );
@@ -624,7 +633,7 @@ function variableInlineLink(ctx: RenderContext, name: string): React.ReactNode {
       variant="varinline"
       label={name}
       description={variableCard(def)}
-      to={`/${def.page}#var-${name}`}
+      to={defHref(def.page, `#var-${name}`)}
       preventScrollReset={samePage}
     />
   );
@@ -658,7 +667,7 @@ function renderTermDef(ctx: RenderContext, token: string): React.ReactNode {
       label={renderInline(name, ctx)}
       id={termId(name)}
       description={shadowed ? shadowed.explanation : explanation}
-      to={shadowed ? `/${shadowed.page}#${termId(name)}` : undefined}
+      to={shadowed ? defHref(shadowed.page, `#${termId(name)}`) : undefined}
     />
   );
 }
@@ -683,7 +692,7 @@ function renderReference(ctx: RenderContext, name: string, extra: string): React
         variant="termref"
         label={renderInline(name, ctx)}
         description={extra || term.explanation}
-        to={`/${term.page}#${termId(name)}`}
+        to={defHref(term.page, `#${termId(name)}`)}
         preventScrollReset={samePage}
       />
     );
@@ -714,59 +723,129 @@ function termInlineLink(ctx: RenderContext, name: string): React.ReactNode {
       variant="varinline"
       label={name}
       description={def.explanation}
-      to={`/${def.page}#${termId(name)}`}
+      to={defHref(def.page, `#${termId(name)}`)}
       preventScrollReset={samePage}
     />
   );
+}
+
+type BarePage = { path: string; title: string };
+
+/**
+ * A bare mention of a page's exact name — orange text like a variable, hover for
+ * the page it points at, click to open it. Written this way so prose can name a
+ * page and have it link to the explanation without any markup.
+ */
+function pageInlineLink(ctx: RenderContext, name: string, page: BarePage): React.ReactNode {
+  return (
+    <Chip
+      key={k()}
+      ctx={ctx}
+      variant="varinline"
+      label={name}
+      description={`**${page.title}** — \`/${page.path}\``}
+      to={`/${page.path}`}
+    />
+  );
+}
+
+/**
+ * Names that a bare mention may link to a page: its title and its final path
+ * segment, for pages of the current project only. The page being rendered is
+ * skipped (a page shouldn't link to itself), as is the "Home" segment — every
+ * project has one and the word is far too common in prose. Home's title (the
+ * project's own name) still counts.
+ */
+function pageNameMap(ctx: RenderContext): Record<string, BarePage> {
+  const map: Record<string, BarePage> = {};
+  if (!ctx.project) {
+    return map;
+  }
+  const prefix = ctx.project.toLowerCase() + "/";
+  for (const page of ctx.pages) {
+    if (!page.path.toLowerCase().startsWith(prefix) || page.path.toLowerCase() === ctx.currentPath.toLowerCase()) {
+      continue;
+    }
+    for (const name of [page.title, page.path.split("/").pop()!]) {
+      if (name.length > 1 && name !== "Home" && !(name in map)) {
+        map[name] = page;
+      }
+    }
+  }
+  return map;
 }
 
 function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Word-boundary regex matching every defined variable AND term name, plus a
-// name→kind lookup, cached per variables map (rebuilt whenever it changes).
-const nameRegexCache = new WeakMap<Record<string, RenderVariable>, { re: RegExp; kind: Record<string, "var" | "term"> } | null>();
-
-function bareNameMatcher(ctx: RenderContext) {
-  if (!nameRegexCache.has(ctx.variables)) {
-    const kind: Record<string, "var" | "term"> = {};
-    // Terms first so a variable of the same name overrides it (values win).
-    for (const name of Object.keys(ctx.terms ?? {})) {
-      kind[name] = "term";
-    }
-    for (const name of Object.keys(ctx.variables)) {
-      kind[name] = "var";
-    }
-    const names = Object.keys(kind);
-    nameRegexCache.set(
-      ctx.variables,
-      names.length === 0
-        ? null
-        : {
-            kind,
-            re: new RegExp(
-              `(?<![\\w.-])(${names
-                .sort((a, b) => b.length - a.length)
-                .map(escapeRe)
-                .join("|")})(?![\\w-])(?!\\.[\\w-])`,
-              "g"
-            ),
-          }
-    );
-  }
-  return nameRegexCache.get(ctx.variables) ?? null;
+interface BareMatcher {
+  re: RegExp;
+  kind: Record<string, "var" | "term" | "page">;
+  pages: Record<string, BarePage>;
 }
 
-// Plain prose: bare words matching a defined variable or term name become inline
-// (orange, non-boxed) links to their definition.
+// Word-boundary regex matching every variable, term and page name, plus a
+// name→kind lookup. Cached against the page list, and rebuilt whenever any of
+// the three maps is replaced (they all come from one loader run).
+const nameRegexCache = new WeakMap<
+  object,
+  { variables: object; terms: object | undefined; currentPath: string; matcher: BareMatcher | null }
+>();
+
+function bareNameMatcher(ctx: RenderContext): BareMatcher | null {
+  const cached = nameRegexCache.get(ctx.pages);
+  if (
+    cached &&
+    cached.variables === ctx.variables &&
+    cached.terms === ctx.terms &&
+    cached.currentPath === ctx.currentPath
+  ) {
+    return cached.matcher;
+  }
+
+  const kind: Record<string, "var" | "term" | "page"> = {};
+  // Least specific first: a term of the same name overrides a page, and a
+  // variable overrides both (values win).
+  const pages = pageNameMap(ctx);
+  for (const name of Object.keys(pages)) {
+    kind[name] = "page";
+  }
+  for (const name of Object.keys(ctx.terms ?? {})) {
+    kind[name] = "term";
+  }
+  for (const name of Object.keys(ctx.variables)) {
+    kind[name] = "var";
+  }
+
+  const names = Object.keys(kind);
+  const matcher =
+    names.length === 0
+      ? null
+      : {
+          kind,
+          pages,
+          re: new RegExp(
+            `(?<![\\w.-])(${names
+              .sort((a, b) => b.length - a.length)
+              .map(escapeRe)
+              .join("|")})(?![\\w-])(?!\\.[\\w-])`,
+            "g"
+          ),
+        };
+  nameRegexCache.set(ctx.pages, { variables: ctx.variables, terms: ctx.terms, currentPath: ctx.currentPath, matcher });
+  return matcher;
+}
+
+// Plain prose: bare words matching a defined variable, term or page name become
+// inline (orange, non-boxed) links to their definition.
 function linkifyPlain(text: string, ctx: RenderContext, out: React.ReactNode[]) {
   const matcher = bareNameMatcher(ctx);
   if (!matcher) {
     out.push(text);
     return;
   }
-  const { re, kind } = matcher;
+  const { re, kind, pages } = matcher;
   re.lastIndex = 0;
   let last = 0;
   let m: RegExpExecArray | null;
@@ -775,7 +854,11 @@ function linkifyPlain(text: string, ctx: RenderContext, out: React.ReactNode[]) 
       out.push(text.slice(last, m.index));
     }
     const name = m[1];
-    out.push(kind[name] === "term" ? termInlineLink(ctx, name) : variableInlineLink(ctx, name));
+    if (kind[name] === "page") {
+      out.push(pageInlineLink(ctx, name, pages[name]));
+    } else {
+      out.push(kind[name] === "term" ? termInlineLink(ctx, name) : variableInlineLink(ctx, name));
+    }
     last = m.index + m[0].length;
   }
   if (last < text.length) {
@@ -859,7 +942,7 @@ export function renderInline(
             label={label}
             description={shadowed ? variableCard(shadowed) : desc || ""}
             id={`var-${name}`}
-            to={shadowed ? `/${shadowed.page}#var-${name}` : undefined}
+            to={shadowed ? defHref(shadowed.page, `#var-${name}`) : undefined}
           />
         );
       } else {

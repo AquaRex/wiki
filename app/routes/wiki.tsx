@@ -73,9 +73,16 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const currentPath = page?.path ?? pagePath;
   // Resolve defs as seen from THIS page: its own local defs win over globals of
   // the same name, and a shadowed global is kept for the local chip's hover.
-  const variableDefs = (await store.getVariableDefs()).filter((d) => pathInProject(d.page, project));
+  // Globals defined on a hidden or locked page come from the global_defs view.
+  // They go FIRST so a def that also arrives from a readable page — the copy
+  // that knows where it lives, and can therefore link — overrides the anonymous
+  // one during resolution.
+  const globals = (await store.getGlobalDefs())[project.toLowerCase()] ?? { variables: [], terms: [] };
+  const inProject = (d: { page: string }) => pathInProject(d.page, project);
+
+  const variableDefs = [...globals.variables, ...(await store.getVariableDefs()).filter(inProject)];
   const projectVariables = resolveVariablesForPage(variableDefs, currentPath);
-  const termDefs = (await store.getTermDefs()).filter((d) => pathInProject(d.page, project));
+  const termDefs = [...globals.terms, ...(await store.getTermDefs()).filter(inProject)];
   const projectTerms = resolveTermsForPage(termDefs, currentPath);
 
   return {

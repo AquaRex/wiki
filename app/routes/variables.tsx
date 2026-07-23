@@ -14,13 +14,22 @@ export function meta({ params }: Route.MetaArgs) {
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const store = getStore();
   const requested = normalizePath(params.project);
-  const [allPages, variableDefs] = await Promise.all([store.listPages(), store.getVariableDefs()]);
+  const [allPages, variableDefs, globalDefs] = await Promise.all([
+    store.listPages(),
+    store.getVariableDefs(),
+    store.getGlobalDefs(),
+  ]);
   const projectPage = allPages.find((p) => pathInProject(p.path, requested));
   const project = projectPage ? projectPage.path.split("/")[0] : requested;
   const pages = allPages.filter((p) => pathInProject(p.path, project));
-  const variables = variableDefs
-    .filter((v) => pathInProject(v.page, project))
-    .sort((a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope));
+  const scanned = variableDefs.filter((v) => pathInProject(v.page, project));
+  // Globals whose defining page is hidden or locked: the registry lists them so
+  // the project's vocabulary is complete, without saying where they live.
+  const named = new Set(scanned.filter((v) => v.scope === "global").map((v) => v.name));
+  const restricted = (globalDefs[project.toLowerCase()]?.variables ?? []).filter((v) => !named.has(v.name));
+  const variables = [...scanned, ...restricted].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope)
+  );
   return { project, pages, variables };
 }
 
@@ -68,18 +77,26 @@ export default function Variables({ loaderData }: Route.ComponentProps) {
                   </tr>
                 )}
                 {visible.map((v) => (
-                  <tr key={v.name}>
+                  <tr key={`${v.name}·${v.page}`}>
                     <td>
-                      <Link to={`/${v.page}#var-${v.name}`} className="font-mono text-[13px] font-semibold text-waccent">
-                        {v.name}
-                      </Link>
+                      {v.page ? (
+                        <Link to={`/${v.page}#var-${v.name}`} className="font-mono text-[13px] font-semibold text-waccent">
+                          {v.name}
+                        </Link>
+                      ) : (
+                        <span className="font-mono text-[13px] font-semibold text-waccent">{v.name}</span>
+                      )}
                     </td>
                     <td className="font-mono text-[13px]">{v.value}</td>
                     <td className="text-text-dim">{v.description}</td>
                     <td>
-                      <Link to={`/${v.page}`} className="wikilink font-mono text-[12.5px]">
-                        /{stripProjectPrefix(v.page)}
-                      </Link>
+                      {v.page ? (
+                        <Link to={`/${v.page}`} className="wikilink font-mono text-[12.5px]">
+                          /{stripProjectPrefix(v.page)}
+                        </Link>
+                      ) : (
+                        <span className="font-mono text-[12.5px] text-text-faint">a restricted page</span>
+                      )}
                     </td>
                   </tr>
                 ))}
