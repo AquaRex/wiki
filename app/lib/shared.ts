@@ -415,7 +415,7 @@ export function pathInProject(pagePath: string, project: string): boolean {
 }
 
 /** True for `rel` itself and anything beneath it. */
-function relCovers(locked: string, rel: string): boolean {
+export function relCovers(locked: string, rel: string): boolean {
   const low = locked.toLowerCase();
   const target = rel.toLowerCase();
   return target === low || target.startsWith(low + "/");

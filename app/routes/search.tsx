@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Search as SearchIcon, X } from "lucide-react";
+import { FolderClosed, Search as SearchIcon, X } from "lucide-react";
 import type { Route } from "./+types/search";
 import {
+  folderList,
   isPathLocked,
   normalizePath,
   parseTagParam,
+  parentOfRel,
   pathInProject,
+  relCovers,
   projectDisplayName,
   stripProjectPrefix,
   type PageCard,
@@ -35,29 +38,33 @@ export async function clientLoader({ request, params }: Route.ClientLoaderArgs) 
     cards: cards.filter((p) => pathInProject(p.path, project)),
     query: (url.searchParams.get("q") ?? "").trim(),
     tags: parseTagParam(url.searchParams.get("tags")),
+    folders: parseTagParam(url.searchParams.get("folders")),
   };
 }
 
-/** A tag button — pressed when it is part of the current filter. */
-function TagChip({
-  tag,
+/** The folder a page lives in, as a project-relative path ("" at the root). */
+function folderOfCard(card: PageCard): string {
+  return parentOfRel(stripProjectPrefix(card.path));
+}
+
+/** A filter button — pressed when it is part of the current filter. */
+function FilterChip({
+  label,
+  icon,
   count,
   active,
   onToggle,
 }: {
-  tag: string;
+  label: string;
+  icon?: React.ReactNode;
   count?: number;
   active: boolean;
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-pressed={active}
-      className={`tag ${active ? "on" : ""}`}
-    >
-      {tag}
+    <button type="button" onClick={onToggle} aria-pressed={active} className={`tag ${active ? "on" : ""}`}>
+      {icon}
+      {label}
       {count !== undefined && <span className="ml-1.5 text-text-faint">{count}</span>}
       {active && <X className="ml-1 inline-block size-3 align-[-1px]" />}
     </button>
@@ -65,7 +72,7 @@ function TagChip({
 }
 
 export default function Search({ loaderData }: Route.ComponentProps) {
-  const { project, cards, query: urlQuery, tags } = loaderData;
+  const { project, cards, query: urlQuery, tags, folders } = loaderData;
   const { privateUnlocked } = useAuth();
   const meta = useProjectMeta(project);
   const [, setSearchParams] = useSearchParams();
@@ -118,14 +125,14 @@ export default function Search({ loaderData }: Route.ComponentProps) {
     return () => clearTimeout(timer);
   }, [needle, urlQuery, setSearchParams]);
 
-  const setTags = (next: string[]) => {
+  const setParam = (key: string, next: string[]) => {
     setSearchParams(
       (prev) => {
         const params = new URLSearchParams(prev);
         if (next.length > 0) {
-          params.set("tags", next.join(","));
+          params.set(key, next.join(","));
         } else {
-          params.delete("tags");
+          params.delete(key);
         }
         return params;
       },
@@ -133,14 +140,16 @@ export default function Search({ loaderData }: Route.ComponentProps) {
     );
   };
 
-  const toggleTag = (tag: string) => {
-    const has = tags.some((t) => t.toLowerCase() === tag.toLowerCase());
-    setTags(has ? tags.filter((t) => t.toLowerCase() !== tag.toLowerCase()) : [...tags, tag]);
+  const toggle = (key: string, current: string[], value: string) => {
+    const has = current.some((v) => v.toLowerCase() === value.toLowerCase());
+    setParam(key, has ? current.filter((v) => v.toLowerCase() !== value.toLowerCase()) : [...current, value]);
   };
+  const toggleTag = (tag: string) => toggle("tags", tags, tag);
+  const toggleFolder = (folder: string) => toggle("folders", folders, folder);
 
-  // Pages the text search and the viewer's access allow — the set the tag rail
-  // is built from, so a tag is only offered when it would actually narrow this
-  // list rather than empty it.
+  // Pages the text search and the viewer's access allow. The two rails are
+  // counted against each OTHER's filter, so every chip on screen reports what it
+  // would actually leave rather than what it would leave in isolation.
   const matched = useMemo(
     () =>
       cards
@@ -149,9 +158,18 @@ export default function Search({ loaderData }: Route.ComponentProps) {
     [cards, hits, meta, privateUnlocked]
   );
 
+  const hasTags = (card: PageCard) => {
+    const own = card.tags.map((t) => t.toLowerCase());
+    return tags.every((t) => own.includes(t.toLowerCase()));
+  };
+  // Folders are OR-ed (a page lives in exactly one) and include everything
+  // nested below the chosen folder.
+  const inFolders = (card: PageCard) =>
+    folders.length === 0 || folders.some((f) => relCovers(f, stripProjectPrefix(card.path)));
+
   const tagCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const card of matched) {
+    for (const card of matched.filter(inFolders)) {
       for (const tag of card.tags) {
         counts.set(tag, (counts.get(tag) ?? 0) + 1);
       }
@@ -164,14 +182,31 @@ export default function Search({ loaderData }: Route.ComponentProps) {
       }
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], undefined, { sensitivity: "base" }));
-  }, [matched, tags]);
+  }, [matched, tags, folders]);
+
+  const folderCounts = useMemo(() => {
+    const pool = matched.filter(hasTags);
+    // Every folder in the project, empty ones included — the index shows them,
+    // so the filter does too. A page counts towards each folder above it.
+    const counts = new Map<string, number>();
+    for (const folder of folderList(cards, project, meta)) {
+      if (folder) {
+        counts.set(folder, 0);
+      }
+    }
+    for (const card of pool) {
+      const rel = stripProjectPrefix(card.path);
+      for (const folder of counts.keys()) {
+        if (relCovers(folder, rel)) {
+          counts.set(folder, counts.get(folder)! + 1);
+        }
+      }
+    }
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: "base" }));
+  }, [matched, cards, project, meta, tags]);
 
   const visible = useMemo(() => {
-    const wanted = tags.map((t) => t.toLowerCase());
-    const kept = matched.filter((c) => {
-      const own = c.tags.map((t) => t.toLowerCase());
-      return wanted.every((t) => own.includes(t));
-    });
+    const kept = matched.filter(hasTags).filter(inFolders);
     if (hits) {
       return [...kept].sort(
         (a, b) => (hits.get(b.path.toLowerCase())?.matches ?? 0) - (hits.get(a.path.toLowerCase())?.matches ?? 0)
@@ -186,9 +221,9 @@ export default function Search({ loaderData }: Route.ComponentProps) {
     return [...kept].sort(
       (a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title, undefined, { sensitivity: "base" })
     );
-  }, [matched, tags, hits, meta]);
+  }, [matched, tags, folders, hits, meta]);
 
-  const filtering = Boolean(hits) || tags.length > 0;
+  const filtering = Boolean(hits) || tags.length > 0 || folders.length > 0;
 
   return (
     <Shell pages={cards} project={project} currentPath="">
@@ -199,7 +234,7 @@ export default function Search({ loaderData }: Route.ComponentProps) {
           <p className="hero-lede mt-4">
             {filtering
               ? `${visible.length} of ${cards.length} page${cards.length === 1 ? "" : "s"} in this project.`
-              : `Every page in this project — ${cards.length} in total. Search by name or content, or filter by tag.`}
+              : `Every page in this project — ${cards.length} in total. Search by name or content, or filter by folder and tag.`}
           </p>
           <div className="relative mt-6 max-w-xl">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-faint" />
@@ -226,12 +261,41 @@ export default function Search({ loaderData }: Route.ComponentProps) {
               </button>
             )}
           </div>
+          {folderCounts.length > 0 && (
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <span className="mr-1 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-text-faint">
+                Folders
+              </span>
+              {folderCounts.map(([folder, count]) => (
+                <FilterChip
+                  key={folder}
+                  label={folder}
+                  icon={<FolderClosed className="mr-1.5 inline-block size-3 align-[-1px] text-text-faint" />}
+                  count={count}
+                  active={folders.some((f) => f.toLowerCase() === folder.toLowerCase())}
+                  onToggle={() => toggleFolder(folder)}
+                />
+              ))}
+              {folders.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setParam("folders", [])}
+                  className="font-mono text-[11px] uppercase tracking-wider text-waccent hover:underline"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
           {tagCounts.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="mr-1 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-text-faint">
+                Tags
+              </span>
               {tagCounts.map(([tag, count]) => (
-                <TagChip
+                <FilterChip
                   key={tag}
-                  tag={tag}
+                  label={tag}
                   count={count}
                   active={tags.some((t) => t.toLowerCase() === tag.toLowerCase())}
                   onToggle={() => toggleTag(tag)}
@@ -240,10 +304,10 @@ export default function Search({ loaderData }: Route.ComponentProps) {
               {tags.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setTags([])}
+                  onClick={() => setParam("tags", [])}
                   className="font-mono text-[11px] uppercase tracking-wider text-waccent hover:underline"
                 >
-                  Clear tags
+                  Clear
                 </button>
               )}
             </div>
@@ -278,12 +342,20 @@ export default function Search({ loaderData }: Route.ComponentProps) {
                     </p>
                   ) : null}
                 </Link>
-                {card.tags.length > 0 && (
+                {(card.tags.length > 0 || folderOfCard(card)) && (
                   <div className="mt-3 flex flex-wrap gap-2">
+                    {folderOfCard(card) && (
+                      <FilterChip
+                        label={folderOfCard(card)}
+                        icon={<FolderClosed className="mr-1.5 inline-block size-3 align-[-1px] text-text-faint" />}
+                        active={folders.some((f) => f.toLowerCase() === folderOfCard(card).toLowerCase())}
+                        onToggle={() => toggleFolder(folderOfCard(card))}
+                      />
+                    )}
                     {card.tags.map((tag) => (
-                      <TagChip
+                      <FilterChip
                         key={tag}
-                        tag={tag}
+                        label={tag}
                         active={tags.some((t) => t.toLowerCase() === tag.toLowerCase())}
                         onToggle={() => toggleTag(tag)}
                       />
@@ -298,10 +370,10 @@ export default function Search({ loaderData }: Route.ComponentProps) {
               {needle ? (
                 <>
                   Nothing matched <span className="font-mono text-waccent">{needle}</span>
-                  {tags.length > 0 && " with those tags"}.
+                  {(tags.length > 0 || folders.length > 0) && " within the current filters"}.
                 </>
-              ) : tags.length > 0 ? (
-                <>No page carries every selected tag.</>
+              ) : filtering ? (
+                <>No page matches every filter.</>
               ) : (
                 <>This project has no pages yet.</>
               )}
