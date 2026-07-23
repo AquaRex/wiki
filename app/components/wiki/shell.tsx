@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useTheme } from "next-themes";
-import { Grid2x2, Moon, Sun, Pencil, Eye, LogOut, Plus, Braces, ShieldCheck } from "lucide-react";
+import { Grid2x2, Moon, Sun, Pencil, LogOut, Plus, Braces, ShieldCheck } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { projectDisplayName, type PageSummary } from "~/lib/shared";
 import { useAuth } from "~/lib/auth";
@@ -105,14 +105,17 @@ export function Shell({
                     write, so offering it would only produce an error. */}
                 {canEdit && (
                   <Button
-                    variant={editMode ? "default" : "outline"}
-                    size="sm"
+                    variant={editMode ? "default" : "ghost"}
+                    size="icon"
                     onClick={() => setEditMode(!editMode)}
-                    className="gap-1.5 font-mono text-[11px] uppercase tracking-wider"
+                    // One pen among the other icons; whether it is filled says
+                    // which mode you're in, and the badge below spells it out.
+                    className={editMode ? "" : "text-text-faint hover:text-foreground"}
                     title={editMode ? "Switch to preview (read-only)" : "Turn editing on"}
+                    aria-label={editMode ? "Switch to preview" : "Turn editing on"}
+                    aria-pressed={editMode}
                   >
-                    {editMode ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
-                    {editMode ? "Preview" : "Edit"}
+                    <Pencil className="size-4" />
                   </Button>
                 )}
                 {/* The way into administration once signed in — the sign-in
