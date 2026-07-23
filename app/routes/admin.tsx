@@ -15,29 +15,15 @@ export function meta() {
 const REMEMBERED_EMAIL_KEY = "wiki-remembered-email";
 
 export default function Admin() {
-  const { signedIn, email: currentEmail, signIn, signOut } = useAuth();
+  const { signedIn, isOwner, email: currentEmail, signIn, signOut } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [isOwner, setIsOwner] = useState(false);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const to = searchParams.get("to") || "/";
-
-  // Only the wiki owner is offered the user screen; the RPC behind it refuses
-  // anyone else regardless, so this only decides whether to show the way in.
-  useEffect(() => {
-    if (!signedIn) {
-      setIsOwner(false);
-      return;
-    }
-    getStore()
-      .isOwner()
-      .then(setIsOwner)
-      .catch(() => setIsOwner(false));
-  }, [signedIn]);
 
   // Prefill the last-used email (never the password) so returning is one click.
   useEffect(() => {

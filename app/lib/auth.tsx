@@ -15,6 +15,8 @@ interface AuthState {
   setEditMode(on: boolean): void;
   /** True when the account may write at all. A signed-in reader may not. */
   canEdit: boolean;
+  /** True for the wiki owner — the only one who may manage users. */
+  isOwner: boolean;
   /** Editing is allowed only when the account may write AND edit mode is on. */
   editUnlocked: boolean;
   /** A signed-in user may read private content. */
@@ -43,6 +45,7 @@ const AuthContext = createContext<AuthState>({
   editMode: false,
   setEditMode: () => {},
   canEdit: false,
+  isOwner: false,
   editUnlocked: false,
   privateUnlocked: false,
   email: null,
@@ -65,6 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Persisted so a page reload keeps you in the same mode you left.
   const [editMode, setEditModeState] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined" && window.localStorage.getItem(EDIT_MODE_KEY) === "1") {
@@ -140,14 +144,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!signedIn) {
       setCanEdit(false);
+      setIsOwner(false);
       return;
     }
     let cancelled = false;
-    getStore()
-      .isAdmin()
-      .then((admin) => {
+    const store = getStore();
+    Promise.all([store.isAdmin(), store.isOwner()])
+      .then(([admin, owner]) => {
         if (!cancelled) {
           setCanEdit(admin);
+          setIsOwner(owner);
         }
       })
       .catch(() => {});
@@ -163,6 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         editMode,
         setEditMode,
         canEdit,
+        isOwner,
         editUnlocked: signedIn && canEdit && editMode,
         privateUnlocked: signedIn,
         email,

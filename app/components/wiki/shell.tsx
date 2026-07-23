@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useTheme } from "next-themes";
-import { Grid2x2, Moon, Sun, Pencil, Eye, LogOut, Plus, Braces } from "lucide-react";
+import { Grid2x2, Moon, Sun, Pencil, Eye, LogOut, Plus, Braces, ShieldCheck } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { projectDisplayName, type PageSummary } from "~/lib/shared";
 import { useAuth } from "~/lib/auth";
@@ -23,7 +23,7 @@ export function Shell({
   currentPath: string;
   children: React.ReactNode;
 }) {
-  const { signedIn, canEdit, editMode, setEditMode, editUnlocked, displayName, signOut } = useAuth();
+  const { signedIn, canEdit, isOwner, editMode, setEditMode, editUnlocked, displayName, signOut } = useAuth();
   const meta = useProjectMeta(project);
   const { resolvedTheme, setTheme } = useTheme();
   const location = useLocation();
@@ -113,6 +113,21 @@ export function Shell({
                   >
                     {editMode ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
                     {editMode ? "Preview" : "Edit"}
+                  </Button>
+                )}
+                {/* The way into administration once signed in — the sign-in
+                    card is no longer reachable from here, so the owner needs
+                    this to get to user management. */}
+                {isOwner && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    render={<Link to="/admin/users" />}
+                    title="Admin panel"
+                    aria-label="Admin panel"
+                    className="text-waccent"
+                  >
+                    <ShieldCheck className="size-4" />
                   </Button>
                 )}
                 {/* Your own account — name and password, nothing else. */}

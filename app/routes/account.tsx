@@ -6,7 +6,6 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Avatar } from "~/components/wiki/avatar";
 import { useAuth } from "~/lib/auth";
-import { getStore } from "~/lib/store";
 import { wikiConfig } from "~/wiki.config";
 
 export function meta() {
@@ -19,12 +18,11 @@ export function meta() {
  * is here — this page is about the account, not about the wiki.
  */
 export default function Account() {
-  const { signedIn, ready, email, displayName, canEdit, updateAccount } = useAuth();
+  const { signedIn, ready, email, displayName, canEdit, isOwner, updateAccount } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState(displayName);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [isOwner, setIsOwner] = useState(false);
   const [busy, setBusy] = useState("");
   const [saved, setSaved] = useState("");
   const [error, setError] = useState("");
@@ -38,15 +36,6 @@ export default function Account() {
       navigate("/admin?to=/account", { replace: true });
     }
   }, [ready, signedIn, navigate]);
-
-  useEffect(() => {
-    if (signedIn) {
-      getStore()
-        .isOwner()
-        .then(setIsOwner)
-        .catch(() => setIsOwner(false));
-    }
-  }, [signedIn]);
 
   const saveName = async () => {
     const wanted = name.trim();
