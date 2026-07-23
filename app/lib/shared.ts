@@ -36,6 +36,33 @@ export interface PageSummary {
   access: AccessLevel;
 }
 
+/** A page summary with the fields the search page lists. */
+export interface PageCard extends PageSummary {
+  lede: string;
+  tags: string[];
+}
+
+/** The search page's URL for a text query and/or a set of tag filters. */
+export function searchHref(project: string, opts: { query?: string; tags?: string[] } = {}): string {
+  const params = new URLSearchParams();
+  if (opts.query) {
+    params.set("q", opts.query);
+  }
+  if (opts.tags?.length) {
+    params.set("tags", opts.tags.join(","));
+  }
+  const qs = params.toString();
+  return `/${project}/search${qs ? `?${qs}` : ""}`;
+}
+
+/** Reads the `tags` search param — a comma-separated list. */
+export function parseTagParam(raw: string | null): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
 export interface VariableDef {
   name: string;
   value: string;

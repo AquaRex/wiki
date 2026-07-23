@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Search } from "lucide-react";
-import { isPathLocked, pathInProject, type SearchResult } from "~/lib/shared";
+import { isPathLocked, pathInProject, searchHref, type SearchResult } from "~/lib/shared";
 import { getStore } from "~/lib/store";
 import { useAuth } from "~/lib/auth";
 import { useProjectMeta } from "~/lib/meta";
@@ -105,9 +105,16 @@ export function SearchBox({
             setOpen(true);
           }
         }}
+        // Enter on an empty box, or a double-click, opens the search page with
+        // no filter — which lists every page in the project.
+        onDoubleClick={() => {
+          if (project) {
+            go(searchHref(project, { query: query.trim() }));
+          }
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && query.trim().length >= 2) {
-            go(`${project ? `/${project}` : ""}/search?q=${encodeURIComponent(query.trim())}`);
+          if (e.key === "Enter" && project) {
+            go(searchHref(project, { query: query.trim() }));
           }
           if (e.key === "Escape") {
             setOpen(false);
@@ -151,7 +158,7 @@ export function SearchBox({
               type="button"
               onMouseDown={(e) => {
                 e.preventDefault();
-                go(`${project ? `/${project}` : ""}/search?q=${encodeURIComponent(query.trim())}`);
+                go(searchHref(project, { query: query.trim() }));
               }}
               className="block w-full px-3 py-2 text-left font-mono text-[11px] uppercase tracking-wider text-waccent hover:bg-surface-2"
             >

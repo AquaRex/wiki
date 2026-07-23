@@ -18,6 +18,7 @@ import {
   rewriteLinksInPage,
   searchInPages,
   stripProjectPrefix,
+  type PageCard,
   type PageMove,
   type PageSummary,
   type ProjectMeta,
@@ -32,6 +33,8 @@ import {
 
 export interface WikiStore {
   listPages(): Promise<PageSummary[]>;
+  /** listPages plus each page's lede and tags, for the search listing. */
+  listPageCards(): Promise<PageCard[]>;
   getPage(rawPath: string): Promise<WikiPage | null>;
   /** Fetches the freshest copy of a page, applies `mutate`, and persists it. */
   updatePage(rawPath: string, mutate: (page: WikiPage) => void): Promise<void>;
@@ -186,6 +189,14 @@ class SupabaseStore implements WikiStore {
     const pages = await this.pages();
     return Array.from(pages.values())
       .map((p) => ({ path: p.path, title: p.title, access: p.access }))
+      .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
+  }
+
+  /** listPages plus the lede and tags the search page lists pages by. */
+  async listPageCards(): Promise<PageCard[]> {
+    const pages = await this.pages();
+    return Array.from(pages.values())
+      .map((p) => ({ path: p.path, title: p.title, access: p.access, lede: p.lede, tags: p.tags }))
       .sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
   }
 

@@ -10,6 +10,7 @@ import {
   projectOf,
   resolveTermsForPage,
   resolveVariablesForPage,
+  searchHref,
   type AccessLevel,
   type PageSummary,
   type RootMeta,
@@ -46,7 +47,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const store = getStore();
   const splat = normalizePath((params["*"] ?? "").replace(/\/+$/, ""));
-  const allPages = await store.listPages();
+  const allPages = await store.listPageCards();
 
   if (!splat) {
     const slugs = [...new Set(allPages.map((p) => projectOf(p.path)))];
@@ -93,6 +94,9 @@ export async function clientLoader({ params }: Route.ClientLoaderArgs) {
     project,
     variables: projectVariables,
     terms: projectTerms,
+    // Every tag in use in this project — a bare mention of one links to the
+    // search page filtered by it.
+    tags: [...new Set(allPages.filter((p) => pathInProject(p.path, project)).flatMap((p) => p.tags))],
     requestedPath: pagePath,
   };
 }
@@ -638,6 +642,7 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
     () => ({
       variables: loaderData.variables ?? {},
       terms: loaderData.landing ? {} : (loaderData.terms ?? {}),
+      tags: loaderData.landing ? [] : (loaderData.tags ?? []),
       pages: loaderData.allPages,
       currentPath: loaderData.page?.path ?? loaderData.requestedPath,
       project: loaderData.landing ? undefined : loaderData.project,
@@ -771,9 +776,15 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
                         .map((t) => t.trim())
                         .filter(Boolean)
                         .map((tag) => (
-                          <span key={tag} className="tag">
+                          // A tag is a filter: clicking one lists every page
+                          // carrying it on the search page.
+                          <Link
+                            key={tag}
+                            to={searchHref(project, { tags: [tag] })}
+                            className="tag"
+                          >
                             {tag}
-                          </span>
+                          </Link>
                         ))}
                     </span>
                   )}

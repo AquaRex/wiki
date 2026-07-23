@@ -1196,6 +1196,23 @@
   border: 1px dashed var(--crit);
   cursor: help;
 }
+/* A bare word matching one of the project's tags: the same grey box as `code`,
+   but a link — it opens the search page filtered to that tag. */
+.wiki .tagref {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  border: 1px solid var(--wborder);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--text-dim);
+  text-decoration: none;
+  cursor: pointer;
+}
+.wiki a.tagref:hover {
+  border-color: var(--accent-line);
+  color: var(--waccent);
+}
 .wiki a.coderef code {
   color: var(--waccent);
   border-color: var(--accent-line);
@@ -1430,6 +1447,22 @@
   border: 1px solid var(--wborder);
   border-radius: 5px;
   padding: 4px 9px;
+  transition:
+    color 0.12s,
+    border-color 0.12s,
+    background 0.12s;
+}
+/* A tag that filters — on the search page, and wherever a tag links to it. */
+a.tag:hover,
+button.tag:hover {
+  border-color: var(--accent-line);
+  color: var(--waccent);
+  cursor: pointer;
+}
+.tag.on {
+  color: var(--waccent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 
 /* Edit mode chrome */

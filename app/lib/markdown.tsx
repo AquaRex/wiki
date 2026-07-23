@@ -5,6 +5,7 @@ import { Roadmap } from "~/components/wiki/roadmap";
 import { Sheet } from "~/components/wiki/sheet";
 import { HtmlEmbed } from "~/components/wiki/html-embed";
 import { openLightbox } from "~/components/wiki/lightbox";
+import { searchHref } from "~/lib/shared";
 
 export interface RenderVariable {
   name: string;
@@ -30,6 +31,8 @@ export interface RenderContext {
   variables: Record<string, RenderVariable>;
   /** Named term definitions ({{TypeDef}}), used to resolve {{TypeRef}} links. */
   terms?: Record<string, RenderTerm>;
+  /** Every tag in use in the project — a bare mention of one links to search. */
+  tags?: string[];
   /** All pages (across projects) — used for link resolution. */
   pages: { path: string; title: string }[];
   currentPath: string;
@@ -775,13 +778,25 @@ function pageNameMap(ctx: RenderContext): Record<string, BarePage> {
   return map;
 }
 
+/**
+ * A bare mention of one of the project's tags — a grey box like `code`, but a
+ * link: it opens the search page listing every page carrying that tag.
+ */
+function tagInlineLink(ctx: RenderContext, tag: string): React.ReactNode {
+  return (
+    <Link key={k()} className="tagref" to={searchHref(ctx.project!, { tags: [tag] })} title={`Pages tagged ${tag}`}>
+      {tag}
+    </Link>
+  );
+}
+
 function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 interface BareMatcher {
   re: RegExp;
-  kind: Record<string, "var" | "term" | "page">;
+  kind: Record<string, "var" | "term" | "page" | "tag">;
   pages: Record<string, BarePage>;
 }
 
@@ -790,7 +805,13 @@ interface BareMatcher {
 // the three maps is replaced (they all come from one loader run).
 const nameRegexCache = new WeakMap<
   object,
-  { variables: object; terms: object | undefined; currentPath: string; matcher: BareMatcher | null }
+  {
+    variables: object;
+    terms: object | undefined;
+    tags: object | undefined;
+    currentPath: string;
+    matcher: BareMatcher | null;
+  }
 >();
 
 function bareNameMatcher(ctx: RenderContext): BareMatcher | null {
@@ -799,14 +820,22 @@ function bareNameMatcher(ctx: RenderContext): BareMatcher | null {
     cached &&
     cached.variables === ctx.variables &&
     cached.terms === ctx.terms &&
+    cached.tags === ctx.tags &&
     cached.currentPath === ctx.currentPath
   ) {
     return cached.matcher;
   }
 
-  const kind: Record<string, "var" | "term" | "page"> = {};
-  // Least specific first: a term of the same name overrides a page, and a
-  // variable overrides both (values win).
+  const kind: Record<string, "var" | "term" | "page" | "tag"> = {};
+  // Least specific first: a page of the same name overrides a tag, a term
+  // overrides both, and a variable overrides all three (values win).
+  if (ctx.project) {
+    for (const tag of ctx.tags ?? []) {
+      if (tag.length > 1) {
+        kind[tag] = "tag";
+      }
+    }
+  }
   const pages = pageNameMap(ctx);
   for (const name of Object.keys(pages)) {
     kind[name] = "page";
@@ -833,12 +862,19 @@ function bareNameMatcher(ctx: RenderContext): BareMatcher | null {
             "g"
           ),
         };
-  nameRegexCache.set(ctx.pages, { variables: ctx.variables, terms: ctx.terms, currentPath: ctx.currentPath, matcher });
+  nameRegexCache.set(ctx.pages, {
+    variables: ctx.variables,
+    terms: ctx.terms,
+    tags: ctx.tags,
+    currentPath: ctx.currentPath,
+    matcher,
+  });
   return matcher;
 }
 
 // Plain prose: bare words matching a defined variable, term or page name become
-// inline (orange, non-boxed) links to their definition.
+// inline (orange, non-boxed) links to their definition; a tag becomes a grey box
+// linking to the pages that carry it.
 function linkifyPlain(text: string, ctx: RenderContext, out: React.ReactNode[]) {
   const matcher = bareNameMatcher(ctx);
   if (!matcher) {
@@ -854,7 +890,9 @@ function linkifyPlain(text: string, ctx: RenderContext, out: React.ReactNode[]) 
       out.push(text.slice(last, m.index));
     }
     const name = m[1];
-    if (kind[name] === "page") {
+    if (kind[name] === "tag") {
+      out.push(tagInlineLink(ctx, name));
+    } else if (kind[name] === "page") {
       out.push(pageInlineLink(ctx, name, pages[name]));
     } else {
       out.push(kind[name] === "term" ? termInlineLink(ctx, name) : variableInlineLink(ctx, name));
