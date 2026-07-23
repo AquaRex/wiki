@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRevalidator } from "react-router";
 import { Check, ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, Globe, GripVertical, Lock, Pencil, Plus, Trash2 } from "lucide-react";
-import { getStore } from "~/lib/store";
+import { getStore, type AccessScope } from "~/lib/store";
+import { GrantList } from "./grant-list";
 import {
   lastSegment,
   normalizeSegment,
@@ -618,7 +619,16 @@ export function PageTree({
     setMenuAccess(null);
   };
 
-  // Applies an access level to a page or, for a folder, to every page inside it.
+  /**
+   * The scope an access level applies to. A folder is its own scope now — the
+   * database resolves what is inside it — so nothing is stamped onto the pages
+   * beneath, and moving a page in or out changes what covers it immediately.
+   */
+  const scopeOf = (node: TreeNode): { scope: AccessScope; key: string } =>
+    node.page && !isFolderNode(node)
+      ? { scope: "page", key: node.page.path }
+      : { scope: "folder", key: `${project}/${node.rel}` };
+
   const applyAccess = async (node: TreeNode, level: AccessLevel, password?: string) => {
     if (busy) {
       return;
@@ -626,20 +636,20 @@ export function PageTree({
     setBusy(true);
     try {
       const store = getStore();
-      if (node.page && !isFolderNode(node)) {
-        await store.setAccess("page", node.page.path, level);
-        if (level === "locked" && password) {
-          await store.setLockPassword("page", node.page.path, password);
-        }
-      } else {
-        await store.setFolderAccess(project, node.rel, level, password);
+      const { scope, key } = scopeOf(node);
+      await store.setAccess(scope, key, level);
+      if (level === "locked" && password) {
+        await store.setLockPassword(scope, key, password);
       }
       revalidator.revalidate();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Could not change access.");
     } finally {
       setBusy(false);
-      closeMenu();
+      // Hiding opens the allow-list in place; anything else is done.
+      if (level !== "hidden") {
+        closeMenu();
+      }
     }
   };
 
@@ -648,6 +658,9 @@ export function PageTree({
     if (level === "locked") {
       setMenuAccess({ level, password: "" });
       return;
+    }
+    if (level === "hidden") {
+      setMenuAccess({ level, password: "" });
     }
     void applyAccess(node, level);
   };
@@ -733,7 +746,9 @@ export function PageTree({
             }}
           />
           <div
-            className="fixed z-50 min-w-48 rounded-md border border-border bg-popover py-1 text-[13px] text-popover-foreground shadow-md"
+            className={`fixed z-50 rounded-md border border-border bg-popover py-1 text-[13px] text-popover-foreground shadow-md ${
+              menuAccess?.level === "hidden" ? "w-72" : "min-w-48"
+            }`}
             style={{ left: menu.x, top: menu.y }}
           >
             {isFolderNode(menu.node) && (
@@ -792,6 +807,12 @@ export function PageTree({
                 </button>
               ));
             })()}
+
+            {menuAccess?.level === "hidden" && (
+              <div className="border-t border-border px-3 py-2">
+                <GrantList scope={scopeOf(menu.node).scope} itemKey={scopeOf(menu.node).key} />
+              </div>
+            )}
 
             {menuAccess?.level === "locked" && (
               <div className="grid gap-1.5 border-t border-border px-3 py-2">

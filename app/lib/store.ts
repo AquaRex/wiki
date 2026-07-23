@@ -31,6 +31,13 @@ import {
   type AccessLevel,
 } from "./shared";
 
+/**
+ * What an access level or a grant can be attached to. A folder is a real scope
+ * now: its level and its allow-list cover everything inside it, resolved by the
+ * database rather than stamped onto each page.
+ */
+export type AccessScope = "project" | "folder" | "page";
+
 export interface WikiStore {
   listPages(): Promise<PageSummary[]>;
   /** listPages plus each page's lede and tags, for the search listing. */
@@ -75,22 +82,16 @@ export interface WikiStore {
   unlockPage(rawPath: string, password: string): Promise<WikiPage>;
   /** Each project's access level, keyed by slug (lowercased). */
   getProjectAccess(): Promise<Record<string, AccessLevel>>;
-  /** Sets a project's or page's access level. Locking also needs a password. */
-  setAccess(scope: "project" | "page", key: string, level: AccessLevel): Promise<void>;
-  /**
-   * Applies an access level (and, when locking, a password) to every page inside
-   * a folder — folders aren't a lockable scope of their own, so this stamps each
-   * page individually. `folderRel` is the project-relative folder path.
-   */
-  setFolderAccess(project: string, folderRel: string, level: AccessLevel, password?: string): Promise<void>;
-  /** Sets (or clears, with "") the lock password for a project or page. */
-  setLockPassword(scope: "project" | "page", key: string, password: string): Promise<void>;
-  /** The emails granted to see a hidden project/page. */
-  listGrants(scope: "project" | "page", key: string): Promise<string[]>;
-  /** Grants a user (by email) access to a hidden project/page. */
-  addGrant(scope: "project" | "page", key: string, email: string): Promise<void>;
+  /** Sets a scope's access level. Locking also needs a password. */
+  setAccess(scope: AccessScope, key: string, level: AccessLevel): Promise<void>;
+  /** Sets (or clears, with "") the lock password for a scope. */
+  setLockPassword(scope: AccessScope, key: string, password: string): Promise<void>;
+  /** The emails granted to see a hidden project/folder/page. */
+  listGrants(scope: AccessScope, key: string): Promise<string[]>;
+  /** Grants a user (by email) access to a hidden project/folder/page. */
+  addGrant(scope: AccessScope, key: string, email: string): Promise<void>;
   /** Revokes a user's grant. */
-  removeGrant(scope: "project" | "page", key: string, email: string): Promise<void>;
+  removeGrant(scope: AccessScope, key: string, email: string): Promise<void>;
   uploadImage(file: File, pagePath: string): Promise<string>;
   /**
    * Maps a stored asset src to a fetchable URL. Private images live in a
@@ -612,8 +613,16 @@ class SupabaseStore implements WikiStore {
     return out;
   }
 
-  async setAccess(scope: "project" | "page", key: string, level: AccessLevel) {
-    if (scope === "project") {
+  async setAccess(scope: AccessScope, key: string, level: AccessLevel) {
+    if (scope === "folder") {
+      const { project, rel } = splitPath(key);
+      // A folder that only ever existed implicitly (derived from page paths)
+      // needs a row before it can carry an access level.
+      const { error } = await supabase
+        .from("folders")
+        .upsert({ project_slug: project, rel, access: level }, { onConflict: "project_slug,rel" });
+      fail("Could not change folder access", error);
+    } else if (scope === "project") {
       const { error } = await supabase.from("projects").update({ access: level }).eq("slug", key);
       fail("Could not change project access", error);
       // Making a project public must actually open it: pages can carry their own
@@ -639,30 +648,7 @@ class SupabaseStore implements WikiStore {
     this.invalidate();
   }
 
-  async setFolderAccess(project: string, folderRel: string, level: AccessLevel, password?: string) {
-    const prefix = folderRel ? folderRel.toLowerCase() + "/" : "";
-    const cache = await this.pages();
-    const targets = Array.from(cache.values()).filter((p) => {
-      const { project: proj, rel } = splitPath(p.path);
-      return proj.toLowerCase() === project.toLowerCase() && rel.toLowerCase().startsWith(prefix);
-    });
-
-    for (const page of targets) {
-      const { rel } = splitPath(page.path);
-      const { error } = await supabase
-        .from("pages")
-        .update({ access: level })
-        .eq("project_slug", project)
-        .eq("rel", rel);
-      fail(`Could not change access for ${page.path}`, error);
-      if (level === "locked" && password) {
-        await this.setLockPassword("page", `${project}/${rel}`, password);
-      }
-    }
-    this.invalidate();
-  }
-
-  async setLockPassword(scope: "project" | "page", key: string, password: string) {
+  async setLockPassword(scope: AccessScope, key: string, password: string) {
     const { error } = await supabase.rpc("set_access_password", {
       p_scope: scope,
       p_key: key,
@@ -671,13 +657,13 @@ class SupabaseStore implements WikiStore {
     fail("Could not set the password", error);
   }
 
-  async listGrants(scope: "project" | "page", key: string): Promise<string[]> {
+  async listGrants(scope: AccessScope, key: string): Promise<string[]> {
     const { data, error } = await supabase.rpc("list_grants", { p_scope: scope, p_key: key });
     fail("Could not load the access list", error);
     return (data ?? []) as string[];
   }
 
-  async addGrant(scope: "project" | "page", key: string, email: string) {
+  async addGrant(scope: AccessScope, key: string, email: string) {
     const { error } = await supabase.rpc("grant_access", { p_scope: scope, p_key: key, p_email: email });
     if (error) {
       throw new Error(/no such user|not found/i.test(error.message) ? `No user with email ${email}.` : error.message);
@@ -685,7 +671,7 @@ class SupabaseStore implements WikiStore {
     this.invalidate();
   }
 
-  async removeGrant(scope: "project" | "page", key: string, email: string) {
+  async removeGrant(scope: AccessScope, key: string, email: string) {
     const { error } = await supabase.rpc("revoke_access", { p_scope: scope, p_key: key, p_email: email });
     fail("Could not revoke access", error);
     this.invalidate();
