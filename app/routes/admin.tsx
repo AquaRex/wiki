@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Users } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
@@ -21,9 +21,23 @@ export default function Admin() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const to = searchParams.get("to") || "/";
+
+  // Only the wiki owner is offered the user screen; the RPC behind it refuses
+  // anyone else regardless, so this only decides whether to show the way in.
+  useEffect(() => {
+    if (!signedIn) {
+      setIsOwner(false);
+      return;
+    }
+    getStore()
+      .isOwner()
+      .then(setIsOwner)
+      .catch(() => setIsOwner(false));
+  }, [signedIn]);
 
   // Prefill the last-used email (never the password) so returning is one click.
   useEffect(() => {
@@ -63,9 +77,10 @@ export default function Admin() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
       <div className="w-full max-w-sm rounded-xl border border-border-strong bg-surface p-8 shadow-lg">
-        <div className="eyebrow mb-4 !text-[11px]">{wikiConfig.siteName} · Account</div>
-        <div className="mb-1 flex items-center gap-2 font-heading text-xl font-bold">
-          <ShieldCheck className="size-4 text-waccent" /> Wiki editing
+        {/* The shield carries the whole message — a card this plain doesn't
+            need a heading or a paragraph explaining what signing in is for. */}
+        <div className="mb-6 flex justify-center">
+          <ShieldCheck className="size-16 text-waccent" strokeWidth={1.25} />
         </div>
         {signedIn ? (
           <>
@@ -73,24 +88,27 @@ export default function Admin() {
               Signed in as <span className="font-mono text-[12.5px] text-waccent">{currentEmail}</span>. Use the
               <span className="text-waccent"> Edit</span> toggle in the sidebar to start editing.
             </p>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={async () => {
-                await signOut();
-                getStore().invalidate();
-                navigate(to);
-              }}
-            >
-              Sign out
-            </Button>
+            <div className="grid gap-2">
+              {isOwner && (
+                <Button variant="outline" className="w-full gap-1.5" render={<Link to="/admin/users" />}>
+                  <Users className="size-3.5" /> Manage users
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={async () => {
+                  await signOut();
+                  getStore().invalidate();
+                  navigate(to);
+                }}
+              >
+                Sign out
+              </Button>
+            </div>
           </>
         ) : (
           <>
-            <p className="mb-6 text-sm text-text-dim">
-              Sign in to read restricted pages and to edit. You'll start in preview; turn on editing with the
-              sidebar toggle when you're ready.
-            </p>
             <div className="grid gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="email" className="text-[12px] text-text-dim">

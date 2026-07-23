@@ -37,6 +37,35 @@ import {
  */
 export type AccessScope = "project" | "folder" | "page";
 
+/** An account as the user-management screen sees it. */
+export interface WikiUser {
+  email: string;
+  displayName: string;
+  created: string;
+  lastSignIn: string | null;
+  isAdmin: boolean;
+  isOwner: boolean;
+}
+
+/** One entry of a hidden item's allow-list. */
+export interface GrantRow {
+  scope: AccessScope;
+  key: string;
+  email: string;
+}
+
+/** One save a person made, with how much of the page it touched. */
+export interface UserEdit {
+  id: number;
+  path: string;
+  title: string;
+  editedAt: string;
+  /** True for the save that brought the page into existence. */
+  isCreate: boolean;
+  added: number;
+  removed: number;
+}
+
 export interface WikiStore {
   listPages(): Promise<PageSummary[]>;
   /** listPages plus each page's lede and tags, for the search listing. */
@@ -91,6 +120,20 @@ export interface WikiStore {
   addGrant(scope: AccessScope, key: string, email: string): Promise<void>;
   /** Revokes a user's grant. */
   removeGrant(scope: AccessScope, key: string, email: string): Promise<void>;
+  /** True when the signed-in account owns the wiki (may manage users). */
+  isOwner(): Promise<boolean>;
+  /** Every account, with its role. Owner only. */
+  listUsers(): Promise<WikiUser[]>;
+  /** Gives or takes away write access. Owner only. */
+  setUserAdmin(email: string, admin: boolean): Promise<void>;
+  /** Every grant handed out anywhere. Owner only. */
+  listAllGrants(): Promise<GrantRow[]>;
+  /** Deletes an account (not the pages it wrote). Owner only. */
+  deleteUser(email: string): Promise<void>;
+  /** Every page save a person made, newest first. Owner only. */
+  userActivity(email: string): Promise<UserEdit[]>;
+  /** The text before and after one save, for the +/- view. Owner only. */
+  revisionDiff(id: number): Promise<{ before: string; after: string }>;
   uploadImage(file: File, pagePath: string): Promise<string>;
   /**
    * Maps a stored asset src to a fetchable URL. Private images live in a
@@ -118,6 +161,29 @@ interface PageRow {
   is_locked: boolean;
   sort_order: number;
   updated_at: string;
+  created_at: string;
+  created_by: string;
+  updated_by: string;
+}
+
+interface ActivityRow {
+  id: number;
+  project_slug: string;
+  rel: string;
+  title: string;
+  edited_at: string;
+  is_create: boolean;
+  added: number;
+  removed: number;
+}
+
+interface UserRow {
+  email: string;
+  display_name: string;
+  created_at: string;
+  last_sign_in_at: string | null;
+  is_admin: boolean;
+  is_owner: boolean;
 }
 
 function rowToPage(row: PageRow): WikiPage {
@@ -130,6 +196,9 @@ function rowToPage(row: PageRow): WikiPage {
     tags: row.tags ?? [],
     blocks: row.blocks ?? [],
     updated: row.updated_at ?? "",
+    created: row.created_at ?? "",
+    createdBy: row.created_by ?? "",
+    updatedBy: row.updated_by ?? "",
     access: row.access ?? "public",
     ownAccess: row.own_access ?? row.access ?? "public",
     locked: Boolean(row.is_locked),
@@ -664,6 +733,68 @@ class SupabaseStore implements WikiStore {
   async removeGrant(scope: AccessScope, key: string, email: string) {
     const { error } = await supabase.rpc("revoke_access", { p_scope: scope, p_key: key, p_email: email });
     fail("Could not revoke access", error);
+    this.invalidate();
+  }
+
+  async isOwner() {
+    const { data, error } = await supabase.rpc("wiki_am_i_owner");
+    return !error && data === true;
+  }
+
+  async isAdmin() {
+    const { data, error } = await supabase.rpc("wiki_am_i_admin");
+    return !error && data === true;
+  }
+
+  async listUsers(): Promise<WikiUser[]> {
+    const { data, error } = await supabase.rpc("wiki_list_users");
+    fail("Could not load the user list", error);
+    return ((data ?? []) as UserRow[]).map((row) => ({
+      email: row.email,
+      displayName: row.display_name || row.email.split("@")[0],
+      created: row.created_at ?? "",
+      lastSignIn: row.last_sign_in_at,
+      isAdmin: Boolean(row.is_admin),
+      isOwner: Boolean(row.is_owner),
+    }));
+  }
+
+  async setUserAdmin(email: string, admin: boolean) {
+    const { error } = await supabase.rpc("wiki_set_admin", { p_email: email, p_admin: admin });
+    fail("Could not change the user's access", error);
+    this.invalidate();
+  }
+
+  async listAllGrants(): Promise<GrantRow[]> {
+    const { data, error } = await supabase.rpc("wiki_list_all_grants");
+    fail("Could not load the grants", error);
+    return (data ?? []) as GrantRow[];
+  }
+
+  async userActivity(email: string): Promise<UserEdit[]> {
+    const { data, error } = await supabase.rpc("wiki_user_activity", { p_email: email });
+    fail("Could not load the user's activity", error);
+    return ((data ?? []) as ActivityRow[]).map((row) => ({
+      id: row.id,
+      path: `${row.project_slug}/${row.rel}`,
+      title: row.title,
+      editedAt: row.edited_at,
+      isCreate: Boolean(row.is_create),
+      added: row.added ?? 0,
+      removed: row.removed ?? 0,
+    }));
+  }
+
+  async revisionDiff(id: number): Promise<{ before: string; after: string }> {
+    const { data, error } = await supabase.rpc("wiki_revision_diff", { p_id: id });
+    fail("Could not load the change", error);
+    const row = (Array.isArray(data) ? data[0] : data) as { prev_text: string; cur_text: string } | undefined;
+    return { before: row?.prev_text ?? "", after: row?.cur_text ?? "" };
+  }
+
+  async deleteUser(email: string) {
+    const { error } = await supabase.rpc("wiki_delete_user", { p_email: email });
+    fail("Could not delete the user", error);
     this.invalidate();
   }
 

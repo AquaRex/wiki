@@ -20,6 +20,10 @@ export interface WikiPage {
   tags: string[];
   blocks: WikiBlock[];
   updated: string;
+  created: string;
+  /** Display names, resolved server-side — a byline never carries an email. */
+  createdBy: string;
+  updatedBy: string;
   /** The access level in force here — the strictest of this page and everything
    *  above it (its folders and its project). */
   access: AccessLevel;
@@ -494,6 +498,9 @@ export function blankPage(rawPath: string, title?: string): WikiPage {
     tags: [],
     blocks: [{ id: newBlockId(), text: "Write something…" }],
     updated: "",
+    created: "",
+    createdBy: "",
+    updatedBy: "",
     access: "public",
     ownAccess: "public",
     locked: false,

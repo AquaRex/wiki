@@ -7,6 +7,7 @@ import { projectDisplayName, type PageSummary } from "~/lib/shared";
 import { useAuth } from "~/lib/auth";
 import { useProjectMeta } from "~/lib/meta";
 import { wikiConfig } from "~/wiki.config";
+import { Avatar } from "./avatar";
 import { NewPageDialog } from "./new-page-dialog";
 import { SearchBox } from "./search-box";
 import { PageTree } from "./page-tree";
@@ -22,7 +23,7 @@ export function Shell({
   currentPath: string;
   children: React.ReactNode;
 }) {
-  const { signedIn, editMode, setEditMode, editUnlocked, signOut } = useAuth();
+  const { signedIn, canEdit, editMode, setEditMode, editUnlocked, displayName, signOut } = useAuth();
   const meta = useProjectMeta(project);
   const { resolvedTheme, setTheme } = useTheme();
   const location = useLocation();
@@ -100,16 +101,24 @@ export function Shell({
             </Button>
             {signedIn ? (
               <div className="flex items-center gap-2">
-                <Button
-                  variant={editMode ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setEditMode(!editMode)}
-                  className="gap-1.5 font-mono text-[11px] uppercase tracking-wider"
-                  title={editMode ? "Switch to preview (read-only)" : "Turn editing on"}
-                >
-                  {editMode ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
-                  {editMode ? "Preview" : "Edit"}
-                </Button>
+                {/* A reader has no edit toggle — the database would refuse the
+                    write, so offering it would only produce an error. */}
+                {canEdit && (
+                  <Button
+                    variant={editMode ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setEditMode(!editMode)}
+                    className="gap-1.5 font-mono text-[11px] uppercase tracking-wider"
+                    title={editMode ? "Switch to preview (read-only)" : "Turn editing on"}
+                  >
+                    {editMode ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
+                    {editMode ? "Preview" : "Edit"}
+                  </Button>
+                )}
+                {/* Your own account — name and password, nothing else. */}
+                <Link to="/account" title={`${displayName} · your account`} aria-label="Your account">
+                  <Avatar name={displayName} size={26} className="transition-opacity hover:opacity-80" />
+                </Link>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -132,7 +141,7 @@ export function Shell({
               </Button>
             )}
           </div>
-          {signedIn && (
+          {signedIn && canEdit && (
             <div
               className={`mt-2 rounded-md border px-2 py-1 text-center font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] ${
                 editMode

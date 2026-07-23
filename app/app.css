@@ -1471,6 +1471,57 @@ button.tag:hover {
   border-color: var(--accent-line);
 }
 
+/* ------------------------------------------------------------------ */
+/* Change view — the +/- lines of one save                             */
+/* ------------------------------------------------------------------ */
+.diff {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-x: auto;
+}
+.diff-line {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-mark {
+  flex: 0 0 auto;
+  width: 10px;
+  text-align: center;
+  color: var(--text-faint);
+  user-select: none;
+}
+.diff-text {
+  flex: 1 1 auto;
+}
+.diff-same {
+  color: var(--text-dim);
+}
+.diff-add {
+  background: color-mix(in oklab, var(--good) 14%, transparent);
+  color: var(--text);
+}
+.diff-add .diff-mark {
+  color: var(--good);
+}
+.diff-remove {
+  background: color-mix(in oklab, var(--crit) 12%, transparent);
+  color: var(--text);
+}
+.diff-remove .diff-mark {
+  color: var(--crit);
+}
+/* Stands in for a stretch of unchanged lines that was folded away. */
+.diff-gap {
+  padding: 2px 12px;
+  color: var(--text-faint);
+  background: var(--surface-2);
+  user-select: none;
+}
+
 /* Edit mode chrome */
 .edit-block {
   position: relative;

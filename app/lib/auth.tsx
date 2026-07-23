@@ -13,26 +13,44 @@ interface AuthState {
    */
   editMode: boolean;
   setEditMode(on: boolean): void;
-  /** Editing is allowed only when signed in AND edit mode is on. */
+  /** True when the account may write at all. A signed-in reader may not. */
+  canEdit: boolean;
+  /** Editing is allowed only when the account may write AND edit mode is on. */
   editUnlocked: boolean;
   /** A signed-in user may read private content. */
   privateUnlocked: boolean;
   email: string | null;
+  /** The account's own Display Name, falling back to the part before the @. */
+  displayName: string;
   ready: boolean;
   signIn(email: string, password: string): Promise<string | null>;
   signOut(): Promise<void>;
+  /** Updates this account's own name and/or password. Returns an error message. */
+  updateAccount(changes: { displayName?: string; password?: string }): Promise<string | null>;
+}
+
+/** Up to two initials for the avatar — "Thomas Hetland" becomes "TH". */
+export function initialsOf(name: string): string {
+  const words = name.trim().split(/[\s._-]+/).filter(Boolean);
+  if (words.length === 0) {
+    return "?";
+  }
+  return (words[0][0] + (words.length > 1 ? words[words.length - 1][0] : "")).toUpperCase();
 }
 
 const AuthContext = createContext<AuthState>({
   signedIn: false,
   editMode: false,
   setEditMode: () => {},
+  canEdit: false,
   editUnlocked: false,
   privateUnlocked: false,
   email: null,
+  displayName: "",
   ready: false,
   signIn: async () => "Auth is not ready.",
   signOut: async () => {},
+  updateAccount: async () => "Auth is not ready.",
 });
 
 export function useAuth() {
@@ -46,6 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   // Persisted so a page reload keeps you in the same mode you left.
   const [editMode, setEditModeState] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined" && window.localStorage.getItem(EDIT_MODE_KEY) === "1") {
@@ -86,7 +105,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setEditMode(false);
   };
 
+  /**
+   * Changing your OWN name or password needs no elevated rights — Supabase lets
+   * a session update its own user — so this works for a read-only account too.
+   */
+  const updateAccount = async (changes: { displayName?: string; password?: string }): Promise<string | null> => {
+    const payload: { password?: string; data?: Record<string, string> } = {};
+    if (changes.password) {
+      payload.password = changes.password;
+    }
+    if (changes.displayName !== undefined) {
+      payload.data = { display_name: changes.displayName };
+    }
+    const { data, error } = await supabase.auth.updateUser(payload);
+    if (error) {
+      return error.message;
+    }
+    if (data.user) {
+      setSession((prev) => (prev ? { ...prev, user: data.user } : prev));
+    }
+    // A name change rewrites every byline this account appears in.
+    getStore().invalidate();
+    return null;
+  };
+
   const signedIn = Boolean(session);
+  const email = session?.user.email ?? null;
+  const metaName = (session?.user.user_metadata?.display_name as string | undefined) ?? "";
+  const displayName = metaName.trim() || (email ? email.split("@")[0] : "");
+
+  // Signing in is not permission to write — an account has to be an admin. The
+  // policies enforce this; asking here only stops the interface offering an
+  // edit that would be refused.
+  useEffect(() => {
+    if (!signedIn) {
+      setCanEdit(false);
+      return;
+    }
+    let cancelled = false;
+    getStore()
+      .isAdmin()
+      .then((admin) => {
+        if (!cancelled) {
+          setCanEdit(admin);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn]);
 
   return (
     <AuthContext.Provider
@@ -94,12 +162,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signedIn,
         editMode,
         setEditMode,
-        editUnlocked: signedIn && editMode,
+        canEdit,
+        editUnlocked: signedIn && canEdit && editMode,
         privateUnlocked: signedIn,
-        email: session?.user.email ?? null,
+        email,
+        displayName,
         ready,
         signIn,
         signOut,
+        updateAccount,
       }}
     >
       {children}

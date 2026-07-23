@@ -799,11 +799,27 @@ export default function WikiPage({ loaderData }: Route.ComponentProps) {
               ctx={renderCtx}
               editUnlocked={editUnlocked}
             />
-            {page.updated && (
-              <div className="mt-16 border-t border-border pt-4 font-mono text-[11.5px] text-text-faint">
-                Last updated {new Date(page.updated).toLocaleString()} · /{page.path}
-              </div>
-            )}
+            {/* Byline: who started the page on the left, who touched it last on
+                the right, and the page's own path between them. */}
+            <div className="mt-16 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-t border-border pt-4 font-mono text-[11.5px] text-text-faint">
+              <span>
+                {page.created && (
+                  <>
+                    Created{page.createdBy && <> by <span className="text-text-dim">{page.createdBy}</span></>}{" "}
+                    {new Date(page.created).toLocaleDateString()}
+                  </>
+                )}
+              </span>
+              <span className="order-last w-full text-center sm:order-none sm:w-auto">/{page.path}</span>
+              <span className="text-right">
+                {page.updated && (
+                  <>
+                    Updated{page.updatedBy && <> by <span className="text-text-dim">{page.updatedBy}</span></>}{" "}
+                    {new Date(page.updated).toLocaleString()}
+                  </>
+                )}
+              </span>
+            </div>
           </div>
         </>
       )}
