@@ -9,7 +9,6 @@ import {
   type SheetData,
   extractTerms,
   extractVariables,
-  isRelLocked,
   normalizePath,
   parseGlobalDefRows,
   projectOf,
@@ -296,9 +295,11 @@ class SupabaseStore implements WikiStore {
   }
 
   async createProject(slug: string, title: string, isPrivate: boolean) {
+    // Access is the real setting — is_private is derived from it by a trigger,
+    // so sending is_private here would be silently overwritten.
     const { error } = await supabase
       .from("projects")
-      .insert({ slug, title, lede: "", is_private: isPrivate, sort_order: 0 });
+      .insert({ slug, title, lede: "", access: isPrivate ? "hidden" : "public", sort_order: 0 });
     fail(`Could not create project ${slug}`, error);
   }
 
@@ -329,9 +330,9 @@ class SupabaseStore implements WikiStore {
   }
 
   /**
-   * Writes back an edited index. Locks are resolved here rather than in a
-   * policy: a locked folder stamps is_private onto every row beneath it, so
-   * each row carries its own truth.
+   * Writes back an edited index: the sort order, plus which folders exist.
+   * Access is not touched here — the database resolves it from the hierarchy,
+   * so the index can be reordered without ever restating a permission.
    */
   async saveMeta(project: string, meta: ProjectMeta) {
     const [pages, folders] = await Promise.all([
@@ -340,14 +341,10 @@ class SupabaseStore implements WikiStore {
     ]);
     fail("Could not load the project index", pages.error ?? folders.error);
 
-    const rootMeta = await this.getRootMeta();
-    const projectLocked = rootMeta.private.some((s) => s.toLowerCase() === project.toLowerCase());
-    const lockOf = (rel: string) => projectLocked || isRelLocked(meta, rel);
-
     const pageUpdates = (pages.data ?? []).map((row) =>
       supabase
         .from("pages")
-        .update({ is_private: lockOf(row.rel), sort_order: meta.order[row.rel] ?? 0 })
+        .update({ sort_order: meta.order[row.rel] ?? 0 })
         .eq("project_slug", project)
         .eq("rel", row.rel)
     );
@@ -355,12 +352,7 @@ class SupabaseStore implements WikiStore {
     const existingFolders = new Set((folders.data ?? []).map((f) => f.rel));
     const folderUpserts = meta.folders.map((rel) =>
       supabase.from("folders").upsert(
-        {
-          project_slug: project,
-          rel,
-          is_private: lockOf(rel),
-          sort_order: meta.order[rel] ?? 0,
-        },
+        { project_slug: project, rel, sort_order: meta.order[rel] ?? 0 },
         { onConflict: "project_slug,rel" }
       )
     );
@@ -393,38 +385,22 @@ class SupabaseStore implements WikiStore {
    * Writes back the project list. Locking a project cascades onto its pages and
    * folders so a private project cannot leak a public page.
    */
+  /**
+   * Saves the project list's order. Privacy used to be stamped down the tree
+   * from here; access is resolved by the database now, so this only orders.
+   */
   async saveRootMeta(meta: RootMeta) {
     const { data, error } = await supabase.from("projects").select("slug");
     fail("Could not load the project list", error);
 
-    const locked = (slug: string) => meta.private.some((s) => s.toLowerCase() === slug.toLowerCase());
     const updates = (data ?? []).map((row) =>
       supabase
         .from("projects")
-        .update({ is_private: locked(row.slug), sort_order: meta.order[row.slug] ?? 0 })
+        .update({ sort_order: meta.order[row.slug] ?? 0 })
         .eq("slug", row.slug)
     );
     for (const result of await Promise.all(updates)) {
       fail("Could not save the project list", result.error);
-    }
-
-    // Cascade a project-level lock down; unlocking restores each row's own lock.
-    for (const row of data ?? []) {
-      if (locked(row.slug)) {
-        const { error: cascadeError } = await supabase
-          .from("pages")
-          .update({ is_private: true })
-          .eq("project_slug", row.slug);
-        fail("Could not lock the project's pages", cascadeError);
-        const { error: folderError } = await supabase
-          .from("folders")
-          .update({ is_private: true })
-          .eq("project_slug", row.slug);
-        fail("Could not lock the project's folders", folderError);
-      } else {
-        const projectMeta = await this.getMeta(row.slug);
-        await this.saveMeta(row.slug, projectMeta);
-      }
     }
     this.invalidate();
   }
