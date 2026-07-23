@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useTheme } from "next-themes";
-import { Grid2x2, Moon, Sun, Pencil, LogOut, Plus, Braces, ShieldCheck } from "lucide-react";
+import { Grid2x2, Moon, Sun, Pencil, LogOut, Plus, Braces, ShieldCheck, UserRound } from "lucide-react";
 import { Button } from "~/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
 import { projectDisplayName, type PageSummary } from "~/lib/shared";
 import { useAuth } from "~/lib/auth";
 import { useProjectMeta } from "~/lib/meta";
@@ -28,6 +29,7 @@ export function Shell({
   const { resolvedTheme, setTheme } = useTheme();
   const location = useLocation();
   const [newPageOpen, setNewPageOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   // Which folder the dialog creates into — "" is the project root, which is what
   // the toolbar button always uses; a folder's context menu sets its own rel.
   const [newPageParent, setNewPageParent] = useState("");
@@ -89,7 +91,9 @@ export function Shell({
           </div>
         </nav>
         <div className="border-t border-border p-3">
-          <div className="flex items-center justify-between gap-2">
+          {/* One evenly spaced row of same-sized icons. It used to be split
+              left/right around a wide Edit button that no longer exists. */}
+          <div className="flex items-center gap-1">
             <Button
               variant="ghost"
               size="icon"
@@ -100,7 +104,7 @@ export function Shell({
               <Moon className="hidden size-4 dark:block" />
             </Button>
             {signedIn ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
                 {/* A reader has no edit toggle — the database would refuse the
                     write, so offering it would only produce an error. */}
                 {canEdit && (
@@ -133,27 +137,61 @@ export function Shell({
                     <ShieldCheck className="size-4" />
                   </Button>
                 )}
-                {/* Your own account — name and password, nothing else. */}
-                <Link to="/account" title={`${displayName} · your account`} aria-label="Your account">
-                  <Avatar name={displayName} size={26} className="transition-opacity hover:opacity-80" />
-                </Link>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => signOut()}
-                  title="Sign out"
-                  aria-label="Sign out"
-                  className="text-text-faint hover:text-foreground"
-                >
-                  <LogOut className="size-4" />
-                </Button>
+                {/* Everything about you behind one avatar: the account page and
+                    signing out. Two rarely-used buttons in the footer row read
+                    as clutter next to the ones you press all the time. */}
+                <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+                  {/* size-10 on the trigger matches the icon buttons beside it,
+                      so the row keeps one rhythm instead of the avatar sitting
+                      tighter than everything else. */}
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        title={displayName}
+                        aria-label="Your account"
+                        className="flex size-10 items-center justify-center rounded-md hover:bg-surface-2"
+                      >
+                        <Avatar name={displayName} size={26} className="transition-opacity hover:opacity-80" />
+                      </button>
+                    }
+                  />
+                  <PopoverContent align="end" side="top" className="w-56 gap-1 p-1.5">
+                    <div className="flex items-center gap-2 border-b border-border px-2 pb-2 pt-1">
+                      <Avatar name={displayName} size={30} />
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13px] font-medium">{displayName}</span>
+                        <span className="block font-mono text-[10.5px] text-text-faint">
+                          {isOwner ? "Owner" : canEdit ? "Can edit" : "Read only"}
+                        </span>
+                      </span>
+                    </div>
+                    <Link
+                      to="/account"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 rounded px-2 py-1.5 text-[13px] hover:bg-surface-2 hover:text-waccent"
+                    >
+                      <UserRound className="size-3.5 text-text-faint" /> Your profile
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        void signOut();
+                      }}
+                      className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-surface-2 hover:text-crit"
+                    >
+                      <LogOut className="size-3.5 text-text-faint" /> Sign out
+                    </button>
+                  </PopoverContent>
+                </Popover>
               </div>
             ) : (
               <Button
                 variant="ghost"
                 size="sm"
                 render={<Link to={`/admin?to=${encodeURIComponent(location.pathname)}`} />}
-                className="gap-1.5 font-mono text-[11px] uppercase tracking-wider text-text-faint"
+                className="ml-auto gap-1.5 font-mono text-[11px] uppercase tracking-wider text-text-faint"
               >
                 <Pencil className="size-3.5" /> Admin
               </Button>
