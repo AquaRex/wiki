@@ -4,7 +4,13 @@ export interface WikiBlock {
 }
 
 /** How an item may be seen: open to all, visible-but-password-gated, or hidden. */
-export type AccessLevel = "public" | "locked" | "hidden";
+/**
+ * public  — everyone.
+ * locked  — visible to everyone, body behind a password.
+ * hidden  — off the public wiki; every admin still sees it.
+ * private — only its owner, whoever it's shared with, and the wiki owner.
+ */
+export type AccessLevel = "public" | "locked" | "hidden" | "private";
 
 export interface WikiPage {
   path: string;
@@ -46,12 +52,11 @@ export interface PageSummary {
   ownAccess: AccessLevel;
 }
 
-/** hidden beats locked beats public — the order access inherits by. */
+/** private beats hidden beats locked beats public — how access inherits. */
+const ACCESS_RANK: Record<AccessLevel, number> = { public: 0, locked: 1, hidden: 2, private: 3 };
+
 export function strictestAccess(a: AccessLevel, b: AccessLevel): AccessLevel {
-  if (a === "hidden" || b === "hidden") {
-    return "hidden";
-  }
-  return a === "locked" || b === "locked" ? "locked" : "public";
+  return ACCESS_RANK[a] >= ACCESS_RANK[b] ? a : b;
 }
 
 /** A page summary with the fields the search page lists. */

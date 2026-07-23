@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRevalidator } from "react-router";
-import { Globe, Lock, EyeOff, ShieldCheck } from "lucide-react";
+import { Globe, Lock, EyeOff, ShieldCheck, UserRound } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
 import { Input } from "~/components/ui/input";
 import { Button } from "~/components/ui/button";
@@ -9,17 +9,26 @@ import type { AccessLevel } from "~/lib/shared";
 import { GrantList } from "./grant-list";
 
 /*
- * Sets the access level of a project, folder or page: public (open), locked
- * (visible but password-gated), or hidden (only allow-listed users see it).
- * Locking prompts for a password; hiding manages an allow-list of user emails.
- * The password and grants live server-side (supabase/schema.sql) and are never
- * read back. Whatever is set here also covers everything inside it.
+ * Sets the access level of a project, folder or page: public, locked (visible
+ * but password-gated), hidden (off the public wiki, open to every editor) or
+ * private (its owner and whoever they list). Locking prompts for a password;
+ * the other two manage an allow-list, which is how a hidden item is opened to a
+ * read-only account or a private one is shared with a colleague.
+ *
+ * Passwords and grants live server-side (supabase/schema.sql) and are never read
+ * back. Whatever is set here also covers everything inside it.
  */
 
 const LEVELS: { value: AccessLevel; label: string; icon: React.ReactNode; blurb: string }[] = [
   { value: "public", label: "Public", icon: <Globe className="size-3.5" />, blurb: "Anyone can see and read it." },
   { value: "locked", label: "Locked", icon: <Lock className="size-3.5" />, blurb: "Everyone sees it; a password unlocks the content." },
-  { value: "hidden", label: "Hidden", icon: <EyeOff className="size-3.5" />, blurb: "Only admins and the users you list see it at all." },
+  { value: "hidden", label: "Hidden", icon: <EyeOff className="size-3.5" />, blurb: "Off the public wiki. Every editor still sees it." },
+  {
+    value: "private",
+    label: "Private",
+    icon: <UserRound className="size-3.5" />,
+    blurb: "Only you, the people you list, and the wiki owner.",
+  },
 ];
 
 export function AccessControl({
@@ -92,7 +101,7 @@ export function AccessControl({
   };
 
   const CurrentIcon =
-    current === "locked" ? Lock : current === "hidden" ? EyeOff : Globe;
+    current === "locked" ? Lock : current === "private" ? UserRound : current === "hidden" ? EyeOff : Globe;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -168,7 +177,7 @@ export function AccessControl({
           </div>
         )}
 
-        {level === "hidden" && (
+        {(level === "hidden" || level === "private") && (
           <div className="border-t border-border pt-3">
             <GrantList scope={scope} itemKey={itemKey} />
           </div>

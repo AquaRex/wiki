@@ -368,6 +368,8 @@ class SupabaseStore implements WikiStore {
     // so sending is_private here would be silently overwritten.
     const { error } = await supabase
       .from("projects")
+      // "Private" on the create form means off the public wiki — hidden, which
+      // every editor still sees. A project only you can see is set afterwards.
       .insert({ slug, title, lede: "", access: isPrivate ? "hidden" : "public", sort_order: 0 });
     fail(`Could not create project ${slug}`, error);
   }

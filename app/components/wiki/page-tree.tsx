@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRevalidator } from "react-router";
-import { Check, ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, Globe, GripVertical, Lock, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, Globe, GripVertical, Lock, Pencil, Plus, Trash2, UserRound } from "lucide-react";
 import { getStore, type AccessScope } from "~/lib/store";
 import { GrantList } from "./grant-list";
 import {
@@ -217,7 +217,7 @@ function TreeItem({
   // A lock for a password-locked item, an eye-off for a hidden one. The icon is
   // solid when the item itself carries the restriction and faint when it only
   // inherits it, so the index shows WHERE a restriction comes from.
-  const AccessIcon = mark?.level === "hidden" ? EyeOff : Lock;
+  const AccessIcon = mark?.level === "private" ? UserRound : mark?.level === "hidden" ? EyeOff : Lock;
   const label = (
     <span className="flex min-w-0 items-center gap-1.5">
       {isFolder ? (
@@ -695,7 +695,7 @@ export function PageTree({
     } finally {
       setBusy(false);
       // Hiding opens the allow-list in place; anything else is done.
-      if (level !== "hidden") {
+      if (level !== "hidden" && level !== "private") {
         closeMenu();
       }
     }
@@ -707,7 +707,9 @@ export function PageTree({
       setMenuAccess({ level, password: "" });
       return;
     }
-    if (level === "hidden") {
+    // Restricting opens the allow-list in place, so it can be shared straight
+    // away without reopening the menu.
+    if (level === "hidden" || level === "private") {
       setMenuAccess({ level, password: "" });
     }
     void applyAccess(node, level);
@@ -797,7 +799,7 @@ export function PageTree({
           />
           <div
             className={`fixed z-50 rounded-md border border-border bg-popover py-1 text-[13px] text-popover-foreground shadow-md ${
-              menuAccess?.level === "hidden" ? "w-72" : "min-w-48"
+              menuAccess?.level === "hidden" || menuAccess?.level === "private" ? "w-72" : "min-w-48"
             }`}
             style={{ left: menu.x, top: menu.y }}
           >
@@ -829,18 +831,18 @@ export function PageTree({
               <Trash2 className="size-3.5" /> Delete {menu.node.page && !isFolderNode(menu.node) ? "page" : "folder"}
             </button>
 
-            {/* Access — for a page, its own level; for a folder, applied to every
-                page inside it (folders aren't a lockable unit on their own). */}
+            {/* Access — set on this item, and inherited by everything inside it. */}
             <div className="my-1 border-t border-border" />
             <div className="px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-text-faint">
-              {menu.node.page && !isFolderNode(menu.node) ? "Access" : "Access · all pages inside"}
+              {menu.node.page && !isFolderNode(menu.node) ? "Access" : "Access · and everything inside"}
             </div>
             {(() => {
               const pageAccess = menu.node.page && !isFolderNode(menu.node) ? menu.node.page.access : null;
-              const rows: { level: AccessLevel; icon: React.ReactNode; label: string }[] = [
-                { level: "public", icon: <Globe className="size-3.5" />, label: "Public" },
-                { level: "locked", icon: <Lock className="size-3.5" />, label: "Locked" },
-                { level: "hidden", icon: <EyeOff className="size-3.5" />, label: "Hidden" },
+              const rows: { level: AccessLevel; icon: React.ReactNode; label: string; hint: string }[] = [
+                { level: "public", icon: <Globe className="size-3.5" />, label: "Public", hint: "Anyone" },
+                { level: "locked", icon: <Lock className="size-3.5" />, label: "Locked", hint: "Password" },
+                { level: "hidden", icon: <EyeOff className="size-3.5" />, label: "Hidden", hint: "Editors" },
+                { level: "private", icon: <UserRound className="size-3.5" />, label: "Private", hint: "Just you" },
               ];
               return rows.map((r) => (
                 <button
@@ -853,12 +855,15 @@ export function PageTree({
                   }`}
                 >
                   {r.icon} {r.label}
-                  {pageAccess === r.level && <Check className="ml-auto size-3.5" />}
+                  <span className="ml-auto flex items-center gap-1.5 text-[10.5px] text-text-faint">
+                    {r.hint}
+                    {pageAccess === r.level && <Check className="size-3.5 text-waccent" />}
+                  </span>
                 </button>
               ));
             })()}
 
-            {menuAccess?.level === "hidden" && (
+            {(menuAccess?.level === "hidden" || menuAccess?.level === "private") && (
               <div className="border-t border-border px-3 py-2">
                 <GrantList scope={scopeOf(menu.node).scope} itemKey={scopeOf(menu.node).key} />
               </div>

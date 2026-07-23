@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useRevalidator } from "react-router";
-import { Eye, EyeOff, FolderOpen, GripVertical, Lock, LogOut, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, GripVertical, Lock, LogOut, Moon, Pencil, Plus, ShieldCheck, Sun, Trash2, Unlock, UserRound } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { Route } from "./+types/wiki";
 import {
@@ -274,6 +274,7 @@ function Landing({ projects }: { projects: ProjectCard[] }) {
                     /{project.slug}
                     {project.access === "locked" && <Lock className="size-3 text-waccent" />}
                     {project.access === "hidden" && <EyeOff className="size-3 text-waccent" />}
+                    {project.access === "private" && <UserRound className="size-3 text-waccent" />}
                   </div>
                   <div className="mt-3 font-heading text-[20px] font-bold tracking-tight group-hover:text-waccent">
                     {project.title}
