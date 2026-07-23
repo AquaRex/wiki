@@ -5,21 +5,22 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { getStore } from "~/lib/store";
-import { folderList, normalizeSegment, stripProjectPrefix, type PageSummary, type ProjectMeta } from "~/lib/shared";
+import { folderList, normalizeSegment, type PageSummary, type ProjectMeta } from "~/lib/shared";
 
 type Kind = "page" | "folder";
 
 export function NewPageDialog({
   open,
   onOpenChange,
-  currentPath,
+  parentFolder,
   project,
   pages,
   meta,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  currentPath: string;
+  /** Folder rel to create inside — "" for the project root. */
+  parentFolder: string;
   project: string;
   pages: PageSummary[];
   meta: ProjectMeta;
@@ -28,15 +29,7 @@ export function NewPageDialog({
   const revalidator = useRevalidator();
   const folders = useMemo(() => folderList(pages, project, meta), [pages, project, meta]);
 
-  // Default to the folder the current page lives in.
-  const currentFolder = useMemo(() => {
-    const rel = stripProjectPrefix(currentPath);
-    const parent = rel.includes("/") ? rel.split("/").slice(0, -1).join("/") : "";
-    return folders.includes(parent) ? parent : "";
-  }, [currentPath, folders]);
-
   const [kind, setKind] = useState<Kind>("page");
-  const [parent, setParent] = useState(currentFolder);
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,17 +38,16 @@ export function NewPageDialog({
   useEffect(() => {
     if (open) {
       setKind("page");
-      setParent(currentFolder);
       setName("");
       setTitle("");
       setError("");
     }
-  }, [open, currentFolder]);
+  }, [open]);
 
   const cleanName = normalizeSegment(name);
-  // Folders are always created at the project root; nest them by dragging.
-  // Pages honour the chosen location.
-  const rel = kind === "folder" ? cleanName : parent ? `${parent}/${cleanName}` : cleanName;
+  // Everything lands at the project root unless the dialog was opened from a
+  // folder — move things around in the index afterwards by dragging.
+  const rel = parentFolder ? `${parentFolder}/${cleanName}` : cleanName;
 
   const createFolder = async () => {
     const store = getStore();
@@ -102,8 +94,9 @@ export function NewPageDialog({
         <DialogHeader>
           <DialogTitle>New {kind}</DialogTitle>
           <DialogDescription>
+            {parentFolder ? `Created in ${project}/${parentFolder}. ` : `Created in ${project}. `}
             {kind === "page"
-              ? "The page is created immediately — the URL can be shared right away."
+              ? "Drag it in the index to file it into a folder later."
               : "An empty folder to organise pages into. Drag it in the index to move it later."}
           </DialogDescription>
         </DialogHeader>
@@ -125,25 +118,6 @@ export function NewPageDialog({
               ))}
             </div>
           </div>
-          {/* Folders always land at the project root — nest by dragging — so the
-              location picker only applies to pages. */}
-          {kind === "page" && (
-            <div className="grid gap-2">
-              <Label htmlFor="new-page-parent">Location</Label>
-              <select
-                id="new-page-parent"
-                value={parent}
-                onChange={(e) => setParent(e.target.value)}
-                className="h-9 w-full rounded-md border border-border bg-surface px-2 font-mono text-[13px] outline-none focus:ring-1 focus:ring-accent-line"
-              >
-                {folders.map((folder) => (
-                  <option key={folder} value={folder}>
-                    {folder ? `${project}/${folder}` : project}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
           <div className="grid gap-2">
             <Label htmlFor="new-page-name">{kind === "page" ? "Page name" : "Folder name"}</Label>
             <Input

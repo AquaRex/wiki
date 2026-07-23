@@ -27,6 +27,9 @@ export function Shell({
   const { resolvedTheme, setTheme } = useTheme();
   const location = useLocation();
   const [newPageOpen, setNewPageOpen] = useState(false);
+  // Which folder the dialog creates into — "" is the project root, which is what
+  // the toolbar button always uses; a folder's context menu sets its own rel.
+  const [newPageParent, setNewPageParent] = useState("");
 
   return (
     <div className="flex min-h-screen">
@@ -49,7 +52,10 @@ export function Shell({
             {editUnlocked && (
               <button
                 type="button"
-                onClick={() => setNewPageOpen(true)}
+                onClick={() => {
+                  setNewPageParent("");
+                  setNewPageOpen(true);
+                }}
                 className="flex items-center gap-1 rounded font-mono text-[10.5px] font-semibold uppercase tracking-wider text-waccent hover:underline"
               >
                 <Plus className="size-3" /> New page
@@ -62,6 +68,10 @@ export function Shell({
             currentPath={currentPath}
             editUnlocked={editUnlocked}
             meta={meta}
+            onNewInFolder={(rel) => {
+              setNewPageParent(rel);
+              setNewPageOpen(true);
+            }}
           />
           <div className="mt-4 border-t border-border pt-3">
             <Link
@@ -144,7 +154,7 @@ export function Shell({
       <NewPageDialog
         open={newPageOpen}
         onOpenChange={setNewPageOpen}
-        currentPath={currentPath}
+        parentFolder={newPageParent}
         project={project}
         pages={pages}
         meta={meta}

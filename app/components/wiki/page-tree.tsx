@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRevalidator } from "react-router";
-import { Check, ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, Globe, GripVertical, Lock, Pencil, Trash2 } from "lucide-react";
+import { Check, ChevronRight, EyeOff, FileText, FolderClosed, FolderOpen, Globe, GripVertical, Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import { getStore } from "~/lib/store";
 import {
   lastSegment,
@@ -44,6 +44,69 @@ function isFolderNode(node: TreeNode): boolean {
   return !node.page || node.children.length > 0 || Boolean(node.explicitFolder);
 }
 
+/** Home is the project's landing page — it is pinned first at the top level. */
+function orderComparator(order: Record<string, number>) {
+  const rank = (rel: string) => (rel in order ? order[rel] : Number.MAX_SAFE_INTEGER);
+  return (a: { rel: string; name: string }, b: { rel: string; name: string }) => {
+    if (a.rel === HOME) return -1;
+    if (b.rel === HOME) return 1;
+    const diff = rank(a.rel) - rank(b.rel);
+    return diff !== 0 ? diff : a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  };
+}
+
+/**
+ * Rebuilds a complete index from the rels that exist after a change: every
+ * sibling group is renumbered from 0 in the order the tree displays it, and
+ * every folder is listed explicitly.
+ *
+ * Both parts matter. A rel with no order entry reads as "last" here but as 0 in
+ * the database, and a folder with no row has nowhere to store its order at all —
+ * either one makes the index re-sort itself the moment it reloads.
+ */
+function finalizeMeta(next: ProjectMeta, pageRels: string[]): ProjectMeta {
+  interface Slot {
+    rel: string;
+    name: string;
+    children: Slot[];
+  }
+  const root: Slot = { rel: "", name: "", children: [] };
+  const slotFor = (rel: string) => {
+    let node = root;
+    let acc = "";
+    for (const segment of rel.split("/").filter(Boolean)) {
+      acc = acc ? `${acc}/${segment}` : segment;
+      let child = node.children.find((c) => c.name.toLowerCase() === segment.toLowerCase());
+      if (!child) {
+        child = { rel: acc, name: segment, children: [] };
+        node.children.push(child);
+      }
+      node = child;
+    }
+  };
+  for (const rel of [...pageRels, ...next.folders]) {
+    slotFor(rel);
+  }
+
+  const isPage = new Set(pageRels.map((rel) => rel.toLowerCase()));
+  const compare = orderComparator(next.order);
+  const order: Record<string, number> = {};
+  const folders: string[] = [];
+  const walk = (slots: Slot[]) => {
+    slots.sort(compare);
+    slots.forEach((slot, i) => {
+      order[slot.rel] = i;
+      if (!isPage.has(slot.rel.toLowerCase())) {
+        folders.push(slot.rel);
+      }
+      walk(slot.children);
+    });
+  };
+  walk(root.children);
+
+  return { order, private: next.private, folders };
+}
+
 function buildTree(pages: PageSummary[], project: string, meta: ProjectMeta) {
   const root: TreeNode = { name: "", rel: "", fullPath: project, children: [] };
   const byRel = new Map<string, TreeNode>();
@@ -78,15 +141,9 @@ function buildTree(pages: PageSummary[], project: string, meta: ProjectMeta) {
     }
   }
 
-  // Home is the project's landing page — pin it first and keep it out of the way.
-  const rank = (n: TreeNode) => (n.rel in meta.order ? meta.order[n.rel] : Number.MAX_SAFE_INTEGER);
+  const compare = orderComparator(meta.order);
   const sortNodes = (nodes: TreeNode[]) => {
-    nodes.sort((a, b) => {
-      if (a.rel === HOME) return -1;
-      if (b.rel === HOME) return 1;
-      const diff = rank(a) - rank(b);
-      return diff !== 0 ? diff : a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-    });
+    nodes.sort(compare);
     nodes.forEach((n) => sortNodes(n.children));
   };
   sortNodes(root.children);
@@ -256,12 +313,14 @@ export function PageTree({
   currentPath,
   editUnlocked,
   meta,
+  onNewInFolder,
 }: {
   pages: PageSummary[];
   project: string;
   currentPath: string;
   editUnlocked: boolean;
   meta: ProjectMeta;
+  onNewInFolder: (rel: string) => void;
 }) {
   const [local, setLocal] = useState<ProjectMeta>(meta);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -380,11 +439,15 @@ export function PageTree({
       nextOrder[rel] = i;
     });
 
-    const next: ProjectMeta = {
-      order: nextOrder,
-      private: local.private.map((rel) => (rel === dragRel ? newRel : rekey(rel))),
-      folders: local.folders.map((rel) => (rel === dragRel ? newRel : rekey(rel))),
-    };
+    const relAfter = (rel: string) => (rel === dragRel ? newRel : rekey(rel));
+    const next = finalizeMeta(
+      {
+        order: nextOrder,
+        private: local.private.map(relAfter),
+        folders: local.folders.map(relAfter),
+      },
+      pages.map((p) => relAfter(stripProjectPrefix(p.path)))
+    );
 
     const moves: PageMove[] = [];
     if (moved) {
@@ -427,15 +490,19 @@ export function PageTree({
     const dragRel = node.rel;
     const rekey = (key: string) => (key.startsWith(dragRel + "/") ? newRel + key.slice(dragRel.length) : key);
 
+    const relAfter = (rel: string) => (rel === dragRel ? newRel : rekey(rel));
     const nextOrder: Record<string, number> = {};
     for (const [key, value] of Object.entries(local.order)) {
-      nextOrder[key === dragRel ? newRel : rekey(key)] = value;
+      nextOrder[relAfter(key)] = value;
     }
-    const next: ProjectMeta = {
-      order: nextOrder,
-      private: local.private.map((rel) => (rel === dragRel ? newRel : rekey(rel))),
-      folders: local.folders.map((rel) => (rel === dragRel ? newRel : rekey(rel))),
-    };
+    const next = finalizeMeta(
+      {
+        order: nextOrder,
+        private: local.private.map(relAfter),
+        folders: local.folders.map(relAfter),
+      },
+      pages.map((p) => relAfter(stripProjectPrefix(p.path)))
+    );
 
     const moves: PageMove[] = [];
     const oldFull = `${project}/${dragRel}`;
@@ -479,11 +546,14 @@ export function PageTree({
     const covered = (rel: string) =>
       rel.toLowerCase() === node.rel.toLowerCase() || rel.toLowerCase().startsWith(prefix.toLowerCase());
 
-    const next: ProjectMeta = {
-      order: Object.fromEntries(Object.entries(local.order).filter(([rel]) => !covered(rel))),
-      private: local.private.filter((rel) => !covered(rel)),
-      folders: local.folders.filter((rel) => !covered(rel)),
-    };
+    const next = finalizeMeta(
+      {
+        order: Object.fromEntries(Object.entries(local.order).filter(([rel]) => !covered(rel))),
+        private: local.private.filter((rel) => !covered(rel)),
+        folders: local.folders.filter((rel) => !covered(rel)),
+      },
+      pages.filter((p) => !doomed.includes(p)).map((p) => stripProjectPrefix(p.path))
+    );
 
     const previous = local;
     setLocal(next);
@@ -537,7 +607,7 @@ export function PageTree({
     setMenuAccess(null);
     // Keep the menu on screen — it's tall enough to clip near the bottom edge.
     const MENU_W = 200;
-    const MENU_H = 260;
+    const MENU_H = 300;
     const x = Math.min(e.clientX, window.innerWidth - MENU_W - 8);
     const y = Math.min(e.clientY, window.innerHeight - MENU_H - 8);
     setMenu({ node, x: Math.max(8, x), y: Math.max(8, y) });
@@ -666,6 +736,19 @@ export function PageTree({
             className="fixed z-50 min-w-48 rounded-md border border-border bg-popover py-1 text-[13px] text-popover-foreground shadow-md"
             style={{ left: menu.x, top: menu.y }}
           >
+            {isFolderNode(menu.node) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const rel = menu.node.rel;
+                  closeMenu();
+                  onNewInFolder(rel);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-accent-soft hover:text-waccent"
+              >
+                <Plus className="size-3.5" /> New here
+              </button>
+            )}
             <button
               type="button"
               onClick={() => menuRename(menu.node)}
