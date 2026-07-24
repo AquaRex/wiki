@@ -654,8 +654,10 @@ function Chip({
       style={{ left: pos.x + 12, top: pos.y + 16 }}
       role="tooltip"
     >
-      {/* noLinkify: a card shouldn't turn every bare word into a variable chip. */}
-      <span className="wiki">{renderInline(description, ctx, { noLinkify: true })}</span>
+      {/* Formatted like any body text: a variable or term named in a card is
+          highlighted, so a card that points at another definition shows it as
+          such (and, pinned with Alt, you can go read that one too). */}
+      <span className="wiki">{renderInline(description, ctx)}</span>
     </span>
   );
   const cls = `chip ${variant}`;
