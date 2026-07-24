@@ -1183,10 +1183,13 @@
 .wiki .magicval[title] {
   cursor: help;
 }
-/* The value after "=" in a VarDef is white by default (just inline formatting). */
+/* The value after "=" in a VarDef stands out from the orange name. It sits on
+   the chip's own background (light in light mode, dark in dark mode), so it
+   follows the foreground rather than being hardcoded white — white was
+   invisible on the light chip. */
 .wiki .vardef .val {
-  color: #fff;
-  font-weight: 500;
+  color: var(--foreground);
+  font-weight: 600;
 }
 /* Neutral term-definition chip (dark slate). */
 .wiki .termdef {
@@ -1252,6 +1255,14 @@
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   white-space: normal;
+}
+/* Pinned with Alt: a brighter ring says it will stay put while you move to the
+   variable it names. */
+.wiki .hovercard.pinned {
+  border-color: var(--waccent);
+  box-shadow:
+    0 0 0 1px var(--waccent),
+    0 6px 22px rgba(0, 0, 0, 0.4);
 }
 /* The card's inner .wiki formats like body text but compact and on-dark. */
 .wiki .hovercard .wiki {

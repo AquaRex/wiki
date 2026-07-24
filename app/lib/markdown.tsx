@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { UnrealGraph } from "~/components/wiki/unreal-graph";
 import { Roadmap } from "~/components/wiki/roadmap";
@@ -559,6 +559,27 @@ function flashTarget(hash: string): boolean {
   return true;
 }
 
+/**
+ * Whether Alt is held right now, shared across every chip. Holding Alt "pins"
+ * hover cards: a pinned card freezes where it is and stays after the mouse
+ * leaves, so a card that names another variable can be read while hovering that
+ * second variable's own card. Releasing Alt (or leaving the window) drops them.
+ */
+let altHeld = false;
+const altListeners = new Set<(held: boolean) => void>();
+
+if (typeof window !== "undefined") {
+  const set = (held: boolean) => {
+    if (held !== altHeld) {
+      altHeld = held;
+      altListeners.forEach((fn) => fn(held));
+    }
+  };
+  window.addEventListener("keydown", (e) => e.key === "Alt" && set(true));
+  window.addEventListener("keyup", (e) => e.key === "Alt" && set(false));
+  window.addEventListener("blur", () => set(false));
+}
+
 function Chip({
   ctx,
   variant,
@@ -582,15 +603,57 @@ function Chip({
   sameDoc?: boolean;
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [pinned, setPinned] = useState(false);
+  const hovering = useRef(false);
+
+  // Releasing Alt drops this card unless the mouse is still on the chip, where
+  // it reverts to a normal cursor-following tooltip.
+  useEffect(() => {
+    const onAlt = (held: boolean) => {
+      if (!held && !hovering.current) {
+        setPinned(false);
+        setPos(null);
+      }
+    };
+    altListeners.add(onAlt);
+    return () => {
+      altListeners.delete(onAlt);
+    };
+  }, []);
+
   const hoverProps = description
     ? {
-        onMouseEnter: (e: React.MouseEvent) => setPos({ x: e.clientX, y: e.clientY }),
-        onMouseMove: (e: React.MouseEvent) => setPos({ x: e.clientX, y: e.clientY }),
-        onMouseLeave: () => setPos(null),
+        onMouseEnter: (e: React.MouseEvent) => {
+          hovering.current = true;
+          setPos({ x: e.clientX, y: e.clientY });
+          setPinned(altHeld);
+        },
+        onMouseMove: (e: React.MouseEvent) => {
+          // A pinned card holds still so it can be read while the mouse moves on
+          // to the variable it mentions; an ordinary one trails the cursor.
+          if (altHeld) {
+            setPinned(true);
+          } else {
+            setPinned(false);
+            setPos({ x: e.clientX, y: e.clientY });
+          }
+        },
+        onMouseLeave: () => {
+          hovering.current = false;
+          if (altHeld) {
+            setPinned(true);
+          } else {
+            setPos(null);
+          }
+        },
       }
     : {};
   const card = description && pos && (
-    <span className="hovercard" style={{ left: pos.x + 12, top: pos.y + 16 }} role="tooltip">
+    <span
+      className={`hovercard${pinned ? " pinned" : ""}`}
+      style={{ left: pos.x + 12, top: pos.y + 16 }}
+      role="tooltip"
+    >
       {/* noLinkify: a card shouldn't turn every bare word into a variable chip. */}
       <span className="wiki">{renderInline(description, ctx, { noLinkify: true })}</span>
     </span>
