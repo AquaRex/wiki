@@ -1471,6 +1471,38 @@ button.tag:hover {
   border-color: var(--accent-line);
 }
 
+/*
+ * Points out the definition a chip refers to when it is already on this page.
+ * Two pulses of an accent ring — enough to catch the eye without the page
+ * moving, which is the whole point of not following the link.
+ */
+@keyframes wiki-flash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    background-color: transparent;
+  }
+  15%,
+  55% {
+    box-shadow: 0 0 0 4px var(--accent-soft), 0 0 0 5px var(--waccent);
+    background-color: var(--accent-soft);
+  }
+  35% {
+    box-shadow: 0 0 0 2px var(--accent-soft), 0 0 0 3px var(--accent-line);
+    background-color: var(--accent-soft);
+  }
+}
+.wiki .flash-target {
+  border-radius: 5px;
+  animation: wiki-flash 1.5s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wiki .flash-target {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--accent-line);
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Change view — the +/- lines of one save                             */
 /* ------------------------------------------------------------------ */

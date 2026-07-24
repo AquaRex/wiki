@@ -533,6 +533,32 @@ const DEF_INNER_RE = /^\{\{var:(global:)?([A-Za-z0-9_.-]+)\s*(?:=\s*([^|}]*?)\s*
 /* are thin wrappers that decide the label, link target and variant.  */
 /* ---------------------------------------------------------------- */
 
+/**
+ * Points out a definition that is already on this page: flashes it, and only
+ * scrolls if it isn't on screen. Following the link instead would re-render the
+ * route and jump the page — which reads as a reload for a definition that was
+ * often visible all along.
+ */
+function flashTarget(hash: string): boolean {
+  if (typeof document === "undefined") {
+    return false;
+  }
+  const el = document.getElementById(hash.replace(/^#/, ""));
+  if (!el) {
+    return false;
+  }
+  const box = el.getBoundingClientRect();
+  if (box.top < 0 || box.bottom > window.innerHeight) {
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  // Removing and forcing a reflow restarts the animation on a second click.
+  el.classList.remove("flash-target");
+  void el.offsetWidth;
+  el.classList.add("flash-target");
+  window.setTimeout(() => el.classList.remove("flash-target"), 1600);
+  return true;
+}
+
 function Chip({
   ctx,
   variant,
@@ -540,7 +566,7 @@ function Chip({
   description,
   id,
   to,
-  preventScrollReset,
+  sameDoc,
 }: {
   ctx: RenderContext;
   /** Style variant class, e.g. "vardef", "termref". */
@@ -552,7 +578,8 @@ function Chip({
   id?: string;
   /** When set, the chip is a link to this path. */
   to?: string;
-  preventScrollReset?: boolean;
+  /** The target is on this very page — highlight it rather than navigating. */
+  sameDoc?: boolean;
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const hoverProps = description
@@ -569,9 +596,22 @@ function Chip({
     </span>
   );
   const cls = `chip ${variant}`;
+  const hash = to && to.includes("#") ? to.slice(to.indexOf("#")) : "";
   if (to) {
     return (
-      <Link className={cls} id={id} to={to} preventScrollReset={preventScrollReset} {...hoverProps}>
+      <Link
+        className={cls}
+        id={id}
+        to={to}
+        onClick={(e) => {
+          // Only intercept a plain click: ctrl/cmd/middle-click should still
+          // open the definition's page in a new tab.
+          if (sameDoc && hash && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0 && flashTarget(hash)) {
+            e.preventDefault();
+          }
+        }}
+        {...hoverProps}
+      >
         {label}
         {card}
       </Link>
@@ -614,7 +654,7 @@ function variableLink(ctx: RenderContext, name: string, label: React.ReactNode):
       label={label}
       description={variableCard(def)}
       to={defHref(def.page, `#var-${name}`)}
-      preventScrollReset={samePage}
+      sameDoc={samePage}
     />
   );
 }
@@ -637,7 +677,7 @@ function variableInlineLink(ctx: RenderContext, name: string): React.ReactNode {
       label={name}
       description={variableCard(def)}
       to={defHref(def.page, `#var-${name}`)}
-      preventScrollReset={samePage}
+      sameDoc={samePage}
     />
   );
 }
@@ -696,7 +736,7 @@ function renderReference(ctx: RenderContext, name: string, extra: string): React
         label={renderInline(name, ctx)}
         description={extra || term.explanation}
         to={defHref(term.page, `#${termId(name)}`)}
-        preventScrollReset={samePage}
+        sameDoc={samePage}
       />
     );
   }
@@ -727,7 +767,7 @@ function termInlineLink(ctx: RenderContext, name: string): React.ReactNode {
       label={name}
       description={def.explanation}
       to={defHref(def.page, `#${termId(name)}`)}
-      preventScrollReset={samePage}
+      sameDoc={samePage}
     />
   );
 }
