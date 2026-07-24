@@ -568,16 +568,32 @@ function flashTarget(hash: string): boolean {
 let altHeld = false;
 const altListeners = new Set<(held: boolean) => void>();
 
+function setAlt(held: boolean) {
+  if (held !== altHeld) {
+    altHeld = held;
+    altListeners.forEach((fn) => fn(held));
+  }
+}
+
 if (typeof window !== "undefined") {
-  const set = (held: boolean) => {
-    if (held !== altHeld) {
-      altHeld = held;
-      altListeners.forEach((fn) => fn(held));
+  // Holding Alt normally hands keyboard focus to the browser's menu, after which
+  // the page stops receiving key events until it's clicked again — which is why
+  // pinning would only work once. preventDefault keeps focus here, and the mouse
+  // handlers below read e.altKey directly so pinning works even if a keydown is
+  // ever missed.
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Alt") {
+      e.preventDefault();
+      setAlt(true);
     }
-  };
-  window.addEventListener("keydown", (e) => e.key === "Alt" && set(true));
-  window.addEventListener("keyup", (e) => e.key === "Alt" && set(false));
-  window.addEventListener("blur", () => set(false));
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key === "Alt") {
+      e.preventDefault();
+      setAlt(false);
+    }
+  });
+  window.addEventListener("blur", () => setAlt(false));
 }
 
 function Chip({
@@ -624,23 +640,28 @@ function Chip({
   const hoverProps = description
     ? {
         onMouseEnter: (e: React.MouseEvent) => {
+          // e.altKey is the source of truth — it's read at the moment of the
+          // interaction, so it's right even if a key event never reached us.
+          setAlt(e.altKey);
           hovering.current = true;
           setPos({ x: e.clientX, y: e.clientY });
-          setPinned(altHeld);
+          setPinned(e.altKey);
         },
         onMouseMove: (e: React.MouseEvent) => {
+          setAlt(e.altKey);
           // A pinned card holds still so it can be read while the mouse moves on
           // to the variable it mentions; an ordinary one trails the cursor.
-          if (altHeld) {
+          if (e.altKey) {
             setPinned(true);
           } else {
             setPinned(false);
             setPos({ x: e.clientX, y: e.clientY });
           }
         },
-        onMouseLeave: () => {
+        onMouseLeave: (e: React.MouseEvent) => {
+          setAlt(e.altKey);
           hovering.current = false;
-          if (altHeld) {
+          if (e.altKey) {
             setPinned(true);
           } else {
             setPos(null);

@@ -1256,13 +1256,15 @@
   pointer-events: none;
   white-space: normal;
 }
-/* Pinned with Alt: a brighter ring says it will stay put while you move to the
-   variable it names. */
+/* Pinned with Alt: a brighter ring says it will stay put. Unlike a following
+   card it accepts the mouse, so a variable named inside it can be hovered to
+   open that variable's own card in turn. */
 .wiki .hovercard.pinned {
   border-color: var(--waccent);
   box-shadow:
     0 0 0 1px var(--waccent),
     0 6px 22px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
 }
 /* The card's inner .wiki formats like body text but compact and on-dark. */
 .wiki .hovercard .wiki {
